@@ -106,25 +106,6 @@ prek install -t pre-commit
 prek install -t pre-push
 ```
 
-### Running during development from within an activated virtual environment
-
-```bash
-theirc
-```
-
-### Code Quality Tools
-
-- **Linting & Formatting**: `ruff`
-- **Type Checking**: `mypy`
-- Pre-commit hooks run automatically before commits and pushes.
-
-You can also run checks manually from within an activated virtual environment:
-
-```bash
-ruff check
-mypy
-```
-
 ## Configuration
 
 Settings (including speech preferences per server/tab and sound volume) are automatically saved in a configuration file.
