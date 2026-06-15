@@ -51,7 +51,7 @@ This project is designed to be run easily using [uv](https://docs.astral.sh/uv/)
 ## Getting Started
 
 1. Launch **The IRC**.
-2. Go to **Server > Connect...** (or press the appropriate menu).
+2. Go to **Server > Connect...**
 3. The default server (`irc.theirc.net:6697`) is pre-filled.
 4. Enter your nickname and any authentication details (SASL is recommended).
 5. Click **Connect** and start chatting!
