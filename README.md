@@ -10,6 +10,7 @@ A minimalistic, accessible, cross-platform graphical IRC client for TheIRC.net.
 - Built with **screen reader accessibility** in mind
 - **Speech output** support (toggleable globally or per individual tab)
 - Sound notifications for mentions and incoming private messages
+- Settings (including speech preferences per server/tab and sound volume) are automatically saved and restored
 - Full support for modern **IRCv3** features:
   - echo-message
   - labeled-response
@@ -105,10 +106,6 @@ uv sync --frozen
 prek install -t pre-commit
 prek install -t pre-push
 ```
-
-## Configuration
-
-Settings (including speech preferences per server/tab and sound volume) are automatically saved in a configuration file.
 
 ## License
 
