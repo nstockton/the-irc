@@ -1,0 +1,263 @@
+[build-system]
+	requires = ["pdm-backend"]
+	build-backend = "pdm.backend"
+
+[project]
+	name = "the-irc"
+	authors = [
+		{name = "Nick Stockton", email = "nstockton@users.noreply.github.com"},
+	]
+	description = "A lightweight IRC client with screen reader accessibility."
+	license = {text = "MPL-2.0"}
+	readme = "README.md"
+	requires-python = ">=3.10,<4.0"
+	dependencies = [
+		"irc>=20.5,<21.0",
+		"jaraco.functools>=4.4,<5.0",
+		"knickknacks>=0.8,<1.0",
+		"miniaudio>=1.7,<2.0",
+		"speechlight>=3.1,<4.0",
+		"wxPython>=4.2,<5.0",
+	]
+	dynamic = ["version"]
+	keywords = [
+		"irc",
+		"chat",
+		"speech",
+	]
+	classifiers = [
+		"Development Status :: 5 - Production/Stable",
+		"Intended Audience :: End Users/Desktop",
+		"License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+		"Programming Language :: Python",
+		"Programming Language :: Python :: 3",
+		"Programming Language :: Python :: 3 :: Only",
+		"Programming Language :: Python :: 3.10",
+		"Programming Language :: Python :: 3.11",
+		"Programming Language :: Python :: 3.12",
+		"Programming Language :: Python :: 3.13",
+		"Programming Language :: Python :: 3.14",
+		"Programming Language :: Python :: Implementation",
+		"Programming Language :: Python :: Implementation :: CPython",
+		"Operating System :: MacOS",
+		"Operating System :: MacOS :: MacOS X",
+		"Operating System :: Microsoft",
+		"Operating System :: Microsoft :: Windows",
+		"Operating System :: POSIX",
+		"Operating System :: POSIX :: BSD",
+		"Operating System :: POSIX :: Linux",
+	]
+
+[project.urls]
+	homepage = "https://github.com/nstockton/the-irc"
+	repository = "https://github.com/nstockton/the-irc"
+
+[project.scripts]
+	theirc = "theirc.main:run"
+
+[dependency-groups]
+	dev = [
+		"prek>=0.3,<0.4",
+		"pyinstaller==6.20.0; sys_platform == \"win32\"",
+		"types-pyinstaller==6.20.0.20260518; sys_platform == \"win32\"",
+	]
+	lint = [
+		"isort>=8.0,<9.0",
+		"mypy>=1.20,<2.0",
+		"ruff>=0.15,<1.0",
+	]
+	test = [
+		"coverage[toml]>=7.13,<8.0",
+	]
+
+[tool.pdm.build]
+	package-dir = "src"
+	includes = [
+		"src/theirc",
+		"src/theirc_data/*.py",
+	]
+	excludes = []
+	source-includes = [
+		"tests",
+		"uv.lock",
+	]
+
+[tool.pdm.version]
+	fallback_version = "0.0.0"
+	source = "scm"
+	tag_filter = "[vV][0-9]*"
+	tag_regex = '^(?:[vV])(?P<version>\d+\.\d+\.\d+)(?:.*)$'
+	write_to = "theirc/_version.py"
+	write_template = "__version__: str = \"{}\"\n"
+
+[tool.uv]
+	default-groups = ["dev", "lint", "test"]
+	upgrade-package = ["the-irc"]
+
+[tool.ruff]
+	output-format = "concise"
+	extend-include = [
+		"./pyinstaller_windows.spec",
+	]
+	force-exclude = true
+	line-length = 110
+
+[tool.ruff.format]
+	docstring-code-format = false
+	indent-style = "tab"
+	line-ending = "lf"
+
+[tool.ruff.lint]
+	preview = true
+	select = ["ALL"]  # Enable all rules.
+	extend-select = [
+		"D213",  # Multi-line docstring summary should start at the second line.
+	]
+	ignore = [
+		"ANN",  # Flake8-annotations. (We use MyPy for this)
+		"ARG",  # Flake8-unused-arguments.
+		"B019",  # Use of functools.lru_cache or functools.cache on methods can lead to memory leaks.
+		"COM812",  # Trailing comma missing. (Conflicts with formatter)
+		"D105",  # Missing docstring in magic method.
+		"D206",  # Docstring should be indented with spaces, not tabs.
+		"D212",  # Multi-line docstring summary should start at the first line.
+		"EM",  # Flake8-errmsg.
+		"G",  # Flake8-logging-format.
+		"I",  # ISort. (We use ISort package for this)
+		"N802",  # Function name should be lowercase. (wxPython requires this)
+		"PLR2004",  # Magic value used in comparison.
+		"PT",  # Flake8-pytest-style.
+		"T20",  # Flake8-print.
+		"TCH",  # Flake8-type-checking.
+		"TRY003",  # Avoid specifying long messages outside the exception class.
+		"W191",  # Indentation contains tabs.
+	]
+	typing-modules = [
+		"theirc.typedef",
+		"knickknacks.typedef",
+	]
+	unfixable = []
+
+[tool.ruff.lint.flake8-builtins]
+	# To stop Ruff complaining when a built-in name is used as a variable name, add the name to the list.
+	builtins-ignorelist = []
+
+[tool.ruff.lint.flake8-copyright]
+	author = "Nick Stockton"
+	min-file-size = 1  # Minimum file size (in bytes) in which to enforce copyright.
+
+[tool.ruff.lint.flake8-implicit-str-concat]
+	allow-multiline = false
+
+[tool.ruff.lint.mccabe]
+	max-complexity = 15
+
+[tool.ruff.lint.per-file-ignores]
+	"**/_version.py" = ["CPY001"]
+	"./tests/**" = ["D1", "PLC2801", "PLR09", "PLR6301", "SLF001"]
+	"**/typedef.py" = ["D1", "FBT001", "FBT002", "PLR09"]
+	"./src/theirc_data/**/__init__.py" = ["D104"]
+
+[tool.ruff.lint.pydocstyle]
+	convention = "google"
+	ignore-decorators = ["typing.overload"]
+
+[tool.ruff.lint.ruff]
+	# Make it a violation to use a tuple in a subscript without parentheses.
+	parenthesize-tuple-in-subscript = true
+
+[tool.coverage.report]
+	precision = 0
+	fail_under = 0
+	show_missing = true
+	skip_covered = true
+	sort = "Cover"
+	exclude_lines = [
+		'\#\s*pragma: no cover',
+		'^\s*raise AssertionError\b',
+		'^\s*raise NotImplementedError\b',
+		'^\s*def __repr__',
+		'^\s*def __str__',
+		'^\s*if __name__ == .__main__.:',
+	]
+
+[tool.coverage.run]
+	source = ["theirc"]
+	omit = [
+		"src/theirc/__init__.py",
+		"src/theirc/__main__.py",
+		"src/theirc/typedef.py",
+	]
+
+[tool.isort]
+	line_length = 110  # The max length of an import line (used for wrapping long imports).
+	color_output = false
+	# Specify what extensions isort can be ran against.
+	supported_extensions = ["py", "pyi", "pys", "pyw", "spec"]
+	extend_skip = []  # List of files to skip.
+	indent = "tab"  # String to place for indents.
+	atomic = true  # Ensures the output doesn't save if the resulting file contains syntax errors.
+	dedup_headings = true  # Only show an identical custom import heading comment once.
+	multi_line_output = 3  # Vertical hanging indent for long sections of multiple imports.
+	include_trailing_comma = true  # Include a trailing comma on multi line imports that include parentheses.
+	force_grid_wrap = 0  # Only consider line length when forcing lines to be grid wrapped.
+	use_parentheses = true  # Use parentheses for line continuation on length limit instead of slashes.
+	ensure_newline_before_comments = true  # Insert a blank line before a comment following an import.
+	indented_import_headings = false  # Do not include import headings inside indented imports.
+	float_to_top = true  # Float all non-indented imports to the top of the file.
+	lines_after_imports = 2  # Add this many lines after imports / before code begins.
+	force_adds = false  # Do not force import adds if the original file is empty.
+	from_first = false  # Show from imports after straight ones.
+	combine_as_imports = false  # Combine as imports on the same line.
+	order_by_type = true  # Order imports by type, which is determined by case, in addition to alphabetically.
+	reverse_relative = true  # Reverse order of relative imports.
+	add_imports = ["from __future__ import annotations"]  # Add the specified import lines to all files.
+	default_section = "STDLIB"  # Set the default section for imports.
+	# The heading to display for future imports.
+	import_heading_future = "Future Modules:"
+	# The heading to display for standard library imports.
+	import_heading_stdlib = "Built-in Modules:"
+	# The heading to display for third-party imports.
+	import_heading_thirdparty = "Third-party Modules:"
+	# Override known third-party imports.
+	known_third_party = [
+		"irc",
+		"jaraco.functools",
+		"knickknacks",
+		"miniaudio",
+		"PyInstaller",
+		"speechlight",
+		"wx",
+	]
+	# The heading to display for first-party imports.
+	import_heading_firstparty = "The IRC Modules:"
+	# Override known first-party imports.
+	known_first_party = ["theirc"]
+	# The heading to display for local imports.
+	import_heading_localfolder = "Local Modules:"
+
+[tool.mypy]
+	platform = "linux"
+	files = ["src/theirc", "tests", "pyinstaller_windows.spec"]
+	exclude = '^$'
+	local_partial_types = true
+	strict = true
+	disallow_any_unimported = true
+	disallow_any_decorated = true
+	warn_unreachable = true
+	show_error_codes = true
+	no_color_output = true
+
+[[tool.mypy.overrides]]
+	module = "tests.*"
+	disallow_any_decorated = false
+
+[[tool.mypy.overrides]]
+	module = [
+		"irc.*",
+		"jaraco.functools.*",
+		"miniaudio.*",
+		"PyInstaller.config",
+		"wx.*",
+	]
+	ignore_missing_imports = true

@@ -6,12 +6,11 @@ A minimalistic, accessible, cross-platform graphical IRC client for TheIRC.net.
 
 ## Features
 
-- **Minimalistic design** with a clean, high-contrast interface (black background, white text)
+- **Minimalistic design** with a clean, high-contrast interface
 - Built with **screen reader accessibility** in mind
 - **Speech output** support (toggleable globally or per individual tab)
 - Sound notifications for mentions and incoming private messages
-- Settings (including speech preferences per server/tab and sound volume) are automatically saved and restored
-- Full support for modern **IRCv3** features:
+- Support for modern **IRCv3** features:
   - echo-message
   - labeled-response
   - CHATHISTORY
@@ -31,11 +30,9 @@ A minimalistic, accessible, cross-platform graphical IRC client for TheIRC.net.
 
 Pre-built binaries are available on the [Releases page](https://github.com/nstockton/the-irc/releases/latest).
 
-Simply download the latest release and run the executable.
-
 ### macOS and Linux
 
-This project is designed to be run easily using [uv](https://docs.astral.sh/uv/).
+This project is designed to be run using [uv](https://docs.astral.sh/uv/).
 
 1. Install `uv` (if you don't already have it):
 
@@ -54,7 +51,7 @@ This project is designed to be run easily using [uv](https://docs.astral.sh/uv/)
 1. Launch **The IRC**.
 2. Go to **Server > Connect...**
 3. The default server (`irc.theirc.net:6697`) is pre-filled.
-4. Enter your nickname and any authentication details (SASL is recommended).
+4. Enter your nickname and authentication details.
 5. Click **Connect** and start chatting!
 
 New private messages and channels you join will automatically open as tabs.
