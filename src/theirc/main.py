@@ -2170,6 +2170,7 @@ class ConnectDialog(wx.Dialog):  # type: ignore[no-any-unimported, misc]
 				ctrl = wx.TextCtrl(self, value=str(cfg.get(key, default)), style=reduce_or(style))
 				sizer.Add(ctrl, 0, wx.EXPAND | wx.ALL, 5)
 				self.controls[key] = ctrl
+			self.controls["server"].SetFocus()
 			self.tls_cb = wx.CheckBox(self, label="Use TLS / SSL")
 			self.tls_cb.SetValue(cfg.get("use_tls", True))
 			sizer.Add(self.tls_cb, 0, wx.ALL, 10)
