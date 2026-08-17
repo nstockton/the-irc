@@ -369,6 +369,15 @@ wheels = [
 ]
 
 [[package]]
+name = "jeepney"
+version = "0.9.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7b/6f/357efd7602486741aa73ffc0617fb310a29b588ed0fd69c2399acbb85b0c/jeepney-0.9.0.tar.gz", hash = "sha256:cf0e9e845622b81e4a28df94c40345400256ec608d0e55bb8a3feaa9163f5732", size = 106758, upload-time = "2025-02-27T18:51:01.684Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b2/a3/e137168c9c44d18eff0376253da9f1e9234d0239e0ee230d2fee6cea8e55/jeepney-0.9.0-py3-none-any.whl", hash = "sha256:97e5714520c16fc0a45695e5365a2e11b81ea79bba796e26f9f1d178cb182683", size = 49010, upload-time = "2025-02-27T18:51:00.104Z" },
+]
+
+[[package]]
 name = "knickknacks"
 version = "0.8.1"
 source = { registry = "https://pypi.org/simple" }
@@ -4056,17 +4065,18 @@ wheels = [
 
 [[package]]
 name = "speechlight"
-version = "3.1.0"
+version = "3.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "jeepney", marker = "sys_platform == 'linux'" },
     { name = "knickknacks" },
     { name = "pyobjc", marker = "sys_platform == 'darwin'" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "speechd-unofficial", marker = "sys_platform == 'linux'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f0/fe/455ec18e31373e026ec0b8af900745a8bef427f31daae4600bf4c42ce02b/speechlight-3.1.0.tar.gz", hash = "sha256:2469bcf21a5898b3c08ef2e2c18105d07a2dec8590350174224bd908265c6ed0", size = 481039, upload-time = "2026-06-26T06:24:41.793Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9c/6a/01a72ad55f320550bc05cec44b2644ae3ce8dce0b8df6b51fe4234f648f4/speechlight-3.2.0.tar.gz", hash = "sha256:e9cb0dbe0a56361380739a2eb687f9bef7f56e870d3904e3956d031737678c58", size = 482769, upload-time = "2026-08-17T13:03:32.027Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/ab/44cf48b4b3fe4342c7c9273b74f03238a5abc0233e526dc7440d45453781/speechlight-3.1.0-py3-none-any.whl", hash = "sha256:60378c6c4ab55a9b9d868418fcf62eef4eeb54e92f9c7ed32303567dcacae8ae", size = 338879, upload-time = "2026-06-26T06:24:40.551Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/55/caea5fb63bc6689111368050a3752a90adde9e4413fffdafee9510017d4f/speechlight-3.2.0-py3-none-any.whl", hash = "sha256:b20228ee08c4321cd1deb55b55243731885f0aae1a15e750f42c6732b64a9581", size = 341719, upload-time = "2026-08-17T13:03:33.118Z" },
 ]
 
 [[package]]
@@ -4118,7 +4128,7 @@ requires-dist = [
     { name = "jaraco-functools", specifier = ">=4.4,<5.0" },
     { name = "knickknacks", specifier = ">=0.8,<1.0" },
     { name = "miniaudio", specifier = ">=1.7,<2.0" },
-    { name = "speechlight", specifier = ">=3.1,<4.0" },
+    { name = "speechlight", specifier = ">=3.2,<4.0" },
     { name = "wxpython", specifier = ">=4.2,<5.0" },
 ]
 
