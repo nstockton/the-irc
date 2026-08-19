@@ -24,6 +24,7 @@ import logging
 import operator
 import re
 import ssl
+import sys
 import threading
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -1508,6 +1509,9 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		self._update_window_title()
 		self.update_server_menu_state()
 		self.tray_icon: TrayIcon | None = TrayIcon(self)
+		if sys.platform == "linux":
+			# Initialize Orca d-bus connection.
+			speech.output("")
 
 	@property
 	def client(self) -> IRCClient:
