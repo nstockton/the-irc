@@ -4065,7 +4065,7 @@ wheels = [
 
 [[package]]
 name = "speechlight"
-version = "3.2.0"
+version = "3.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jeepney", marker = "sys_platform == 'linux'" },
@@ -4074,9 +4074,9 @@ dependencies = [
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "speechd-unofficial", marker = "sys_platform == 'linux'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9c/6a/01a72ad55f320550bc05cec44b2644ae3ce8dce0b8df6b51fe4234f648f4/speechlight-3.2.0.tar.gz", hash = "sha256:e9cb0dbe0a56361380739a2eb687f9bef7f56e870d3904e3956d031737678c58", size = 482769, upload-time = "2026-08-17T13:03:32.027Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7f/d7/2cd3ef1de618630d922639c6530709afbbdb17af8e79e982bb62cd938397/speechlight-3.2.1.tar.gz", hash = "sha256:22326f61d1af1587b91f2f607e59d98d7f81a15865aea6b028bb9e9742808287", size = 483116, upload-time = "2026-08-19T18:55:05.63Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7e/55/caea5fb63bc6689111368050a3752a90adde9e4413fffdafee9510017d4f/speechlight-3.2.0-py3-none-any.whl", hash = "sha256:b20228ee08c4321cd1deb55b55243731885f0aae1a15e750f42c6732b64a9581", size = 341719, upload-time = "2026-08-17T13:03:33.118Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/c2/ef2862d58db98adc0fe9fb63bf2794bd03fe8a40d17049deba4a19dbba70/speechlight-3.2.1-py3-none-any.whl", hash = "sha256:6b5da5daca22cefd7c08b0c9707d1718af6f2274fd64d067427cfb2d31ecf607", size = 342058, upload-time = "2026-08-19T18:55:06.784Z" },
 ]
 
 [[package]]
