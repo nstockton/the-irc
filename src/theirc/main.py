@@ -1717,7 +1717,8 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 			item: Tab name, TabPanel instance, or integer page index.
 		"""
 		idx = item if isinstance(item, int) else self.get_tab_index(item)
-		if not (0 <= idx <= self.notebook.GetPageCount()):
+		# Valid indices for a wx.Notebook range from 0 to GetPageCount() - 1 (inclusive).
+		if not (0 <= idx < self.notebook.GetPageCount()):
 			logger.warning(f"{idx} not in range 0-{self.notebook.GetPageCount()}")
 			return
 		self.notebook.SetSelection(idx)
