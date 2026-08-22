@@ -1463,6 +1463,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		super().__init__(None, title=WINDOW_TITLE, size=(1000, 700))
 		self._client: IRCClient | None = None
 		self.irc_thread: threading.Thread | None = None
+		self._shutdown_finished: bool = False
 		self.global_speech_enabled: bool = True
 		self.speech_states: dict[str, dict[str, bool]] = {}  # {server_key: {folded_tab_name: enabled}}
 		self._load_speech_states()
@@ -2060,6 +2061,9 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 
 	def _finish_shutdown(self) -> None:
 		"""Join the IRC thread (if running), clean up tray icon, and destroy the wx frame."""
+		if self._shutdown_finished:
+			return
+		self._shutdown_finished = True
 		if self.tray_icon is not None:
 			with suppress(Exception):
 				self.tray_icon.RemoveIcon()
