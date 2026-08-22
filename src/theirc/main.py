@@ -704,7 +704,10 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		if channel_name not in self.channels:
 			return ()
 		ch = self.channels[channel_name]
-		return tuple(k for k, v in PRIVILEGES.items() if getattr(ch, v[1])(nick))
+		privs = [k for k, v in PRIVILEGES.items() if getattr(ch, v[1])(nick)]
+		# Sort by descending rank so the highest privilege appears first.
+		privs.sort(key=lambda k: PRIVILEGES[k][0], reverse=True)
+		return tuple(privs)
 
 	def on_join(self, connection: IRCServerConnectionType, event: IRCEventType) -> None:
 		"""
@@ -1014,12 +1017,36 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		"""
 		Request a fresh LIST of channels from the server.
 
+		Thread-safe: the LIST command is sent from the IRC reactor thread.
+
 		Args:
 			callback: Function to call with the completed list of (channel, user_count, topic) tuples.
 		"""
 		self._list_callback = callback
 		self.listed_channels.clear()
-		self.connection.send_raw("LIST")
+		self._run_in_irc_thread(self.connection.send_raw, "LIST")
+
+	def join(self, channel: str, key: str = "") -> None:
+		"""Thread-safe JOIN."""
+		if key:
+			self._run_in_irc_thread(self.connection.join, channel, key)
+		else:
+			self._run_in_irc_thread(self.connection.join, channel)
+
+	def part(self, channel: str, message: str = "") -> None:
+		"""Thread-safe PART."""
+		if message:
+			self._run_in_irc_thread(self.connection.part, channel, message)
+		else:
+			self._run_in_irc_thread(self.connection.part, channel)
+
+	def send_raw(self, raw: str) -> None:
+		"""Thread-safe raw command send."""
+		self._run_in_irc_thread(self.connection.send_raw, raw)
+
+	def disconnect(self, message: str = "") -> None:
+		"""Thread-safe disconnect."""
+		self._run_in_irc_thread(self.connection.disconnect, message)
 
 	def on_list(self, connection: IRCServerConnectionType, event: IRCEventType) -> None:
 		"""
@@ -1140,13 +1167,47 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		self._label_counter = (self._label_counter + 1) & UINT32_MAX
 		return f"label-{self._label_counter:08x}"
 
+	def _run_in_irc_thread(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+		"""
+		Schedule *func* to run on the IRC reactor thread.
+
+		The jaraco/irc Reactor is thread-safe for state mutations and its
+		scheduler, but ServerConnection I/O methods are not safe to call
+		concurrently from the GUI thread.  All outbound commands therefore
+		go through this helper which uses the reactor's scheduler to
+		execute the call in the next process cycle of the reactor thread.
+
+		Args:
+			func: Callable to invoke (typically a bound method on self.connection).
+			*args: Positional arguments for *func*.
+			**kwargs: Keyword arguments for *func*.
+		"""
+		if not getattr(self, "connection", None) or not self.connection.is_connected():
+			return
+
+		def wrapper() -> None:
+			try:
+				func(*args, **kwargs)
+			except Exception:
+				logger.exception("Error executing command in IRC reactor thread")
+
+		# execute_after(0) queues the callable for the next run_pending()
+		# which happens inside the reactor thread's process_once loop.
+		self.connection.reactor.scheduler.execute_after(0, wrapper)
+
 	def send_privmsg(self, message_info: MessageInfo) -> None:
 		"""
 		Send a PRIVMSG (or CTCP ACTION) to a target, splitting long text as needed.
 
+		Thread-safe: the actual send is performed on the IRC reactor thread.
+
 		Args:
 			message_info: The associated MessageInfo object.
 		"""
+		self._run_in_irc_thread(self._send_privmsg_impl, message_info)
+
+	def _send_privmsg_impl(self, message_info: MessageInfo) -> None:
+		"""Internal implementation of send_privmsg (must run on reactor thread)."""
 		if not self.connection.is_connected() or not message_info.text:
 			return
 		chunks: list[str] = self._split_text_bytes(message_info)
@@ -1182,12 +1243,14 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		"""
 		Stop the reconnection backoff timer and send a QUIT to the server.
 
+		Thread-safe: the actual QUIT is performed on the IRC reactor thread.
+
 		Args:
 			*args: Positional arguments forwarded to the underlying quit method.
 			**kwargs: Keyword arguments forwarded to the underlying quit method.
 		"""
 		self.recon.stop()
-		self.connection.quit(*args, **kwargs)
+		self._run_in_irc_thread(self.connection.quit, *args, **kwargs)
 
 	def on_nicknameinuse(self, connection: IRCServerConnectionType, event: IRCEventType) -> None:
 		"""
@@ -1564,7 +1627,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		if tab_name.casefold() == STATUS_TAB_NAME:
 			return  # Status tab must never be closed.
 		if irc.client.is_channel(tab_name) and self.is_connected:
-			self.client.connection.part(tab_name)
+			self.client.part(tab_name)
 		else:
 			self.close_tab(tab_name)
 
@@ -1608,7 +1671,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 					or ""
 				)
 				num_lines = int(num_lines_str) if num_lines_str.isdigit() else DEFAULT_HISTORY_LENGTH
-				self.client.connection.send_raw(f"CHATHISTORY LATEST {tab_name} * {num_lines}")
+				self.client.send_raw(f"CHATHISTORY LATEST {tab_name} * {num_lines}")
 		if auto_focus:
 			self.select_tab(panel)
 		if update_nick_list:
@@ -1747,13 +1810,12 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 			panel = self.create_tab(message_info.target)
 			self.play_notification_sound(INCOMING_QUERY_CREATED_SOUND)
 		if message_info.history_target is not None:  # History text.
-			# We always want to clear the output before the initial history to prevent message duplication.
-			# There may be some minor visual flicker as previous messages are cleared, but this is acceptable.
-			# This is needed because the server automatically sends offline messages to the client
-			#  upon reconnect, but the history already contains those messages.
-			# We do *not* want to clear the output for subsequent history messages,
-			# as paging might be implemented later.
-			if not panel.received_initial_history and message_info.is_batch_start:
+			# Clear the output on the *first* history message we receive for this tab.
+			# This prevents duplication with any offline messages the server may have
+			# already pushed as live PRIVMSG/NOTICE before the CHATHISTORY batch arrived.
+			# Subsequent history messages (e.g. for paging) leave existing content intact.
+			# Visual flicker is possible but preferred over permanent duplicates.
+			if not panel.received_initial_history:
 				panel.received_initial_history = True
 				panel.clear_text()
 		else:  # Live text.
@@ -2008,13 +2070,13 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 			return
 		if cmd in {"JOIN", "J"}:
 			if args and irc.client.is_channel(args):
-				self.client.connection.join(args)
+				self.client.join(args)
 			else:
 				self.log_system_message("Usage: /join #channel")
 		elif cmd in {"PART", "LEAVE", "P"}:
 			channel: str = args or tab_name
 			if channel and irc.client.is_channel(channel):
-				self.client.connection.part(channel)
+				self.client.part(channel)
 			else:
 				self.log_system_message("Usage: /part [#channel]")
 		elif cmd in {"QUERY", "Q"}:
@@ -2032,7 +2094,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 			else:
 				self.log_system_message("Usage: /me <action>")
 		else:
-			self.client.connection.send_raw(text[1:])
+			self.client.send_raw(text[1:])
 
 	def log_system_message(self, msg: str) -> None:
 		"""
@@ -2083,10 +2145,19 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		dlg: ConnectDialog = ConnectDialog(self)
 		if dlg.ShowModal() == wx.ID_OK:
 			data: dict[str, Any] = dlg.get_data()
+			if not data["server"]:
+				wx.MessageBox("Server hostname is required.", "Error", wx.OK | wx.ICON_ERROR)
+				return
+			if not data["nickname"]:
+				wx.MessageBox("Nickname is required.", "Error", wx.OK | wx.ICON_ERROR)
+				return
 			with Config(CONFIG_NAME) as cfg:
 				cfg.update(data)
 			if self.is_connected:
-				self.client.connection.disconnect()
+				# Stop reconnection attempts and drop the old connection before
+				# replacing the client instance.
+				self.client.recon.stop()
+				self.client.disconnect()
 			self._client = IRCClient(
 				gui=self,
 				server=data["server"],
@@ -2135,7 +2206,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		if dlg.ShowModal() == wx.ID_OK:
 			channel: str | None = dlg.get_selected_channel()
 			if channel:
-				self.client.connection.join(channel)
+				self.client.join(channel)
 
 	def minimize_to_tray(self, event: Any | None = None) -> None:
 		"""

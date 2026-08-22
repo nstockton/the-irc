@@ -150,6 +150,7 @@ class IRCServerConnectionType(Protocol):
 
 	connected: bool
 	handlers: dict[str, Callable[..., Any]]
+	reactor: Any
 	server: str
 
 	def cap(self, subcommand: str, *args: Any) -> None: ...
