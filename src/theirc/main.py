@@ -940,7 +940,8 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			# The query tab should be named after the person who sent us the direct message, not us.
 			message_info.target = message_info.sender
 		message_info.is_mentioned = bool(
-			not message_info.history_target and re.search(rf"\b{folded_our_nick}\b", message_info.folded_text)
+			not message_info.history_target
+			and re.search(rf"\b{re.escape(folded_our_nick)}\b", message_info.folded_text)
 		)
 		wx.CallAfter(self.gui.append_to_output, message_info)
 
