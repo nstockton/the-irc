@@ -24,6 +24,7 @@ import logging
 import operator
 import re
 import ssl
+import sys
 import threading
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -1881,12 +1882,16 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		messages / queries via append_to_output) receive input focus when the
 		user later activates them with the mouse or keyboard navigation.
 
+		Note:
+			Setting focus should only be done if running on Windows as other platforms might
+			annoyingly trigger this event when normal keyboard navigation is used to change the selected tab.
+
 		Args:
 			event: The notebook page-changed event.
 		"""
 		self._update_window_title()
 		panel: TabPanel | None = self.current_tab
-		if panel is not None:
+		if panel is not None and sys.platform == "win32":
 			panel.input.SetFocus()
 		event.Skip()
 
