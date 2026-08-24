@@ -59,7 +59,7 @@ from .typedef import (
 	NickMaskType,
 	SocketWrapperType,
 	URLExtractType,
-	WXListCtrlType,
+	WXListBoxType,
 	WXNotebookType,
 )
 from .utils import get_data_path, reduce_or
@@ -1339,16 +1339,13 @@ class TabPanel(wx.Panel):  # type: ignore[no-any-unimported, misc]
 		self.input.SetName(input_label.GetLabel())
 		if self.is_channel:
 			nick_list_label = wx.StaticText(self, label="Members:")
-			self.nick_list: WXListCtrlType | None = wx.ListCtrl(
-				self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL | wx.LC_NO_HEADER
-			)
-			self.nick_list.InsertColumn(0, "Nicks", width=140)
+			# Use wx.ListBox instead of wx.ListCtrl for proper AT-SPI / Orca support on Linux.
+			self.nick_list: WXListBoxType | None = wx.ListBox(self, style=wx.LB_SINGLE)
 			self.nick_list.SetBackgroundColour(wx.BLACK)
 			self.nick_list.SetForegroundColour(wx.WHITE)
-			self.nick_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self._on_nick_selected)
-			self.nick_list.Bind(wx.EVT_LIST_ITEM_DESELECTED, self._on_nick_deselected)
-			self.nick_list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self.on_query)
-			self.nick_list.Bind(wx.EVT_CHAR, self.on_list_key)
+			self.nick_list.SetName(nick_list_label.GetLabel())
+			self.nick_list.Bind(wx.EVT_LISTBOX_DCLICK, self.on_query)
+			self.nick_list.Bind(wx.EVT_CHAR_HOOK, self.on_nick_list_key)
 			nick_sizer = wx.BoxSizer(wx.VERTICAL)
 			nick_sizer.Add(nick_list_label, 0, wx.ALL, 5)
 			nick_sizer.Add(self.nick_list, 1, wx.EXPAND)
@@ -1362,32 +1359,6 @@ class TabPanel(wx.Panel):  # type: ignore[no-any-unimported, misc]
 		main_sizer.Add(input_label, 0, wx.ALL, 5)
 		main_sizer.Add(self.input, 0, wx.EXPAND | wx.ALL, 5)
 		self.SetSizer(main_sizer)
-
-	def _on_nick_selected(self, event: Any) -> None:
-		"""
-		Highlight the selected nickname row in yellow on blue.
-
-		Args:
-			event: The list item selection event.
-		"""
-		idx: int = event.GetIndex()
-		if idx != -1 and self.nick_list is not None:
-			self.nick_list.SetItemTextColour(idx, wx.YELLOW)
-			self.nick_list.SetItemBackgroundColour(idx, wx.BLUE)
-		event.Skip()
-
-	def _on_nick_deselected(self, event: Any) -> None:
-		"""
-		Restore the default white-on-black colors for a deselected nickname.
-
-		Args:
-			event: The list item deselection event.
-		"""
-		idx: int = event.GetIndex()
-		if idx != -1 and self.nick_list is not None:
-			self.nick_list.SetItemTextColour(idx, wx.WHITE)
-			self.nick_list.SetItemBackgroundColour(idx, wx.BLACK)
-		event.Skip()
 
 	def on_input_enter(self, event: Any) -> None:
 		"""
@@ -1406,27 +1377,33 @@ class TabPanel(wx.Panel):  # type: ignore[no-any-unimported, misc]
 		Open a private query tab for the currently selected nickname.
 
 		Args:
-			event: The list item activation event (double-click or Enter).
+			event: The listbox activation event (double-click or Enter).
 		"""
 		if not self.nick_list:
 			return
-		idx: int = self.nick_list.GetFirstSelected()
-		if idx == -1:
+		idx: int = self.nick_list.GetSelection()
+		if idx == WX_NOT_FOUND:
 			return
-		nick: str = self.nick_list.GetItemText(idx)
+		nick: str = self.nick_list.GetString(idx)
 		if nick:
 			self.main_frame.create_tab(nick.split(maxsplit=1)[0], auto_focus=True)
 
-	def on_list_key(self, event: Any) -> None:
+	def on_nick_list_key(self, event: Any) -> None:
 		"""
 		Treat Return/Enter in the nick list the same as double-click (open query).
 
 		Args:
 			event: The key event.
 		"""
-		if event.GetKeyCode() == wx.WXK_RETURN:
-			self.on_query(None)
-			return
+		wx_port_id = self.main_frame.wx_port_id
+		# GTK already treats enter on wx.ListBox items the same as double click.
+		if wx_port_id != wx.PORT_GTK:
+			code: int = event.GetKeyCode()
+			# Orca makes use of the numpad enter key.
+			non_unix: set[int] = {wx.PORT_MSW, wx.PORT_MAC, wx.PORT_COCOA}
+			if code == wx.WXK_RETURN or (code == wx.WXK_NUMPAD_ENTER and wx_port_id in non_unix):
+				self.on_query(None)
+				return  # Consume the event.
 		event.Skip()
 
 	def on_input_key_down(self, event: Any) -> None:
@@ -1532,6 +1509,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 	def __init__(self) -> None:
 		"""Create the main application window and initialize speech state persistence."""
 		super().__init__(None, title=WINDOW_TITLE, size=(1000, 700))
+		self.wx_port_id: int = wx.PlatformInformation.Get().GetPortId()
 		self._client: IRCClient | None = None
 		self.irc_thread: threading.Thread | None = None
 		self._shutdown_finished: bool = False
@@ -1869,12 +1847,10 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 			return
 		panel.nick_list.Freeze()
 		try:
-			panel.nick_list.DeleteAllItems()
+			panel.nick_list.Clear()
 			if items:
-				for display, _ in items:
-					panel.nick_list.InsertItem(panel.nick_list.GetItemCount(), display)
-				panel.nick_list.Select(0)
-				panel.nick_list.Focus(0)
+				panel.nick_list.AppendItems([display for display, _ in items])
+				panel.nick_list.SetSelection(0)
 		finally:
 			panel.nick_list.Thaw()
 
@@ -2337,48 +2313,25 @@ class ListChannelsDialog(wx.Dialog):  # type: ignore[no-any-unimported, misc]
 		super().__init__(parent, title="List Channels", size=(650, 500))
 		self._client: IRCClient = client
 		sizer = wx.BoxSizer(wx.VERTICAL)
-		sizer.Add(wx.StaticText(self, label="Available channels:"), 0, wx.ALL, 5)
-		self.channel_list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL | wx.LC_NO_HEADER)
-		self.channel_list.InsertColumn(0, "Channels", width=600)
+		label = wx.StaticText(self, label="Available channels:")
+		sizer.Add(label, 0, wx.ALL, 5)
+		# Use wx.ListBox instead of wx.ListCtrl for proper AT-SPI / Orca support on Linux.
+		self.channel_list: WXListBoxType = wx.ListBox(self, style=wx.LB_SINGLE)
 		self.channel_list.SetBackgroundColour(wx.BLACK)
 		self.channel_list.SetForegroundColour(wx.WHITE)
-		self.channel_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self._on_channel_selected)
-		self.channel_list.Bind(wx.EVT_LIST_ITEM_DESELECTED, self._on_channel_deselected)
+		self.channel_list.SetName(label.GetLabel())
+		self.channel_list.Bind(wx.EVT_LISTBOX_DCLICK, lambda evt: self.EndModal(wx.ID_OK))
 		sizer.Add(self.channel_list, 1, wx.EXPAND | wx.ALL, 5)
 		self.fetch_channels()
 		btn_sizer = wx.StdDialogButtonSizer()
-		btn_sizer.AddButton(wx.Button(self, wx.ID_OK, "Join"))
-		btn_sizer.AddButton(wx.Button(self, wx.ID_CANCEL, "Cancel"))
+		join_btn = wx.Button(self, wx.ID_OK, "&Join")
+		join_btn.SetDefault()
+		cancel_btn = wx.Button(self, wx.ID_CANCEL, "Cancel")
+		btn_sizer.AddButton(join_btn)
+		btn_sizer.AddButton(cancel_btn)
 		btn_sizer.Realize()
 		sizer.Add(btn_sizer, 0, wx.EXPAND | wx.ALL, 5)
-		self.channel_list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda evt: self.EndModal(wx.ID_OK))
 		self.SetSizer(sizer)
-
-	def _on_channel_selected(self, event: Any) -> None:
-		"""
-		Invert colors of the selected channel row for visual feedback.
-
-		Args:
-			event: The list item selection event.
-		"""
-		idx: int = event.GetIndex()
-		if idx != -1:
-			self.channel_list.SetItemTextColour(idx, wx.BLACK)
-			self.channel_list.SetItemBackgroundColour(idx, wx.WHITE)
-		event.Skip()
-
-	def _on_channel_deselected(self, event: Any) -> None:
-		"""
-		Restore default colors when a channel row is deselected.
-
-		Args:
-			event: The list item deselection event.
-		"""
-		idx: int = event.GetIndex()
-		if idx != -1:
-			self.channel_list.SetItemTextColour(idx, wx.WHITE)
-			self.channel_list.SetItemBackgroundColour(idx, wx.BLACK)
-		event.Skip()
 
 	def fetch_channels(self) -> None:
 		"""Ask the IRC client to request a fresh channel list."""
@@ -2386,19 +2339,17 @@ class ListChannelsDialog(wx.Dialog):  # type: ignore[no-any-unimported, misc]
 
 	def populate_choice(self, channels: Sequence[tuple[str, str, str]]) -> None:
 		"""
-		Fill the list control with the received channel data.
+		Fill the list box with the received channel data.
 
 		Args:
 			channels: Sequence of (channel_name, user_count, topic) tuples.
 		"""
-		self.channel_list.DeleteAllItems()
+		self.channel_list.Clear()
 		if not channels:
 			return
-		for ch in channels:
-			line: str = f"{ch[0]} ({ch[1]} users) - {ch[2][:60]}"
-			self.channel_list.InsertItem(self.channel_list.GetItemCount(), line)
-		self.channel_list.Select(0)
-		self.channel_list.Focus(0)
+		lines = [f"{ch[0]} ({ch[1]} users) - {ch[2][:60]}" for ch in channels]
+		self.channel_list.AppendItems(lines)
+		self.channel_list.SetSelection(0)
 
 	def get_selected_channel(self) -> str | None:
 		"""
@@ -2407,10 +2358,10 @@ class ListChannelsDialog(wx.Dialog):  # type: ignore[no-any-unimported, misc]
 		Returns:
 			Channel name string or None if nothing is selected.
 		"""
-		idx: int = self.channel_list.GetFirstSelected()
-		if idx == -1:
+		idx: int = self.channel_list.GetSelection()
+		if idx == WX_NOT_FOUND:
 			return None
-		full: str = self.channel_list.GetItemText(idx)
+		full: str = self.channel_list.GetString(idx)
 		return full.split(maxsplit=1)[0]
 
 
@@ -2427,22 +2378,18 @@ class UrlListDialog(wx.Dialog):  # type: ignore[no-any-unimported, misc]
 		"""
 		super().__init__(parent, title="URLs", size=(650, 400))
 		sizer = wx.BoxSizer(wx.VERTICAL)
-		sizer.Add(wx.StaticText(self, label="Extracted URLs:"), 0, wx.ALL, 5)
-		self.url_list: WXListCtrlType = wx.ListCtrl(
-			self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL | wx.LC_NO_HEADER
-		)
-		self.url_list.InsertColumn(0, "URL", width=620)
+		label = wx.StaticText(self, label="Extracted URLs:")
+		sizer.Add(label, 0, wx.ALL, 5)
+		# Use wx.ListBox instead of wx.ListCtrl for proper AT-SPI / Orca support on Linux.
+		self.url_list: WXListBoxType = wx.ListBox(self, style=wx.LB_SINGLE)
 		self.url_list.SetBackgroundColour(wx.BLACK)
 		self.url_list.SetForegroundColour(wx.WHITE)
-		self.url_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self._on_url_selected)
-		self.url_list.Bind(wx.EVT_LIST_ITEM_DESELECTED, self._on_url_deselected)
-		self.url_list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self.on_open)
+		self.url_list.SetName(label.GetLabel())
+		self.url_list.Bind(wx.EVT_LISTBOX_DCLICK, self.on_open)
 		sizer.Add(self.url_list, 1, wx.EXPAND | wx.ALL, 5)
-		for url in urls:
-			self.url_list.InsertItem(self.url_list.GetItemCount(), url)
 		if urls:
-			self.url_list.Select(0)
-			self.url_list.Focus(0)
+			self.url_list.AppendItems(list(urls))
+			self.url_list.SetSelection(0)
 		btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
 		self.open_btn = wx.Button(self, wx.ID_OK, "&Open")
 		self.open_btn.SetDefault()
@@ -2457,22 +2404,6 @@ class UrlListDialog(wx.Dialog):  # type: ignore[no-any-unimported, misc]
 		self.SetSizer(sizer)
 		self.url_list.SetFocus()
 
-	def _on_url_selected(self, event: Any) -> None:
-		"""Highlight the selected URL row."""
-		idx: int = event.GetIndex()
-		if idx != -1:
-			self.url_list.SetItemTextColour(idx, wx.BLACK)
-			self.url_list.SetItemBackgroundColour(idx, wx.WHITE)
-		event.Skip()
-
-	def _on_url_deselected(self, event: Any) -> None:
-		"""Restore default colors when a URL row is deselected."""
-		idx: int = event.GetIndex()
-		if idx != -1:
-			self.url_list.SetItemTextColour(idx, wx.WHITE)
-			self.url_list.SetItemBackgroundColour(idx, wx.BLACK)
-		event.Skip()
-
 	def get_selected_url(self) -> str | None:
 		"""
 		Return the currently selected URL string, or None if nothing is selected.
@@ -2480,10 +2411,10 @@ class UrlListDialog(wx.Dialog):  # type: ignore[no-any-unimported, misc]
 		Returns:
 			The selected URL or None.
 		"""
-		idx: int = self.url_list.GetFirstSelected()
-		if idx == -1:
+		idx: int = self.url_list.GetSelection()
+		if idx == WX_NOT_FOUND:
 			return None
-		return self.url_list.GetItemText(idx)
+		return self.url_list.GetString(idx)
 
 	def on_open(self, event: Any | None = None) -> None:
 		"""
