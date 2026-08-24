@@ -17,6 +17,7 @@
 		"knickknacks>=0.8,<1.0",
 		"miniaudio>=1.7,<2.0",
 		"speechlight>=3.2,<4.0",
+		"urlextract>=1.9,<2.0",
 		"wxPython>=4.2,<5.0",
 	]
 	dynamic = ["version"]
@@ -227,6 +228,7 @@
 		"miniaudio",
 		"PyInstaller",
 		"speechlight",
+		"urlextract",
 		"wx",
 	]
 	# The heading to display for first-party imports.
@@ -258,6 +260,7 @@
 		"jaraco.functools.*",
 		"miniaudio.*",
 		"PyInstaller.config",
+		"urlextract.*",
 		"wx.*",
 	]
 	ignore_missing_imports = true

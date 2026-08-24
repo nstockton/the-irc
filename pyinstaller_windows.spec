@@ -211,7 +211,7 @@ a: Analysis = Analysis(
 	[str(RUN_FILE_PATH)],
 	pathex=[str(APP_DEST_PATH.parent)],
 	binaries=[],
-	datas=[*collect_data_files("irc"), *collect_data_files("jaraco.text")],
+	datas=[*collect_data_files("irc"), *collect_data_files("jaraco.text"), *collect_data_files("urlextract")],
 	hiddenimports=["_cffi_backend"],
 	hookspath=[],
 	runtime_hooks=[],

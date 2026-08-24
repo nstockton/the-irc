@@ -61,6 +61,7 @@ New private messages and channels you join will automatically open as tabs.
 | Shortcut                  | Action                                      |
 |---------------------------|---------------------------------------------|
 | `Ctrl + W` / `Ctrl + F4`  | Close current tab                           |
+| `F3`                      | Open list of extracted URLs   |
 | `F5`                      | Enable speech output globally               |
 | `F6`                      | Disable speech output globally              |
 | `Ctrl + F5`               | Enable speech for the current tab only      |

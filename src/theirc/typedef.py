@@ -12,7 +12,8 @@ from __future__ import annotations
 # Built-in Modules:
 import socket
 from collections.abc import Callable, Generator, Iterable
-from typing import Any, Protocol, TypeAlias, runtime_checkable
+from collections.abc import Set as AbstractSet
+from typing import Any, Literal, Protocol, TypeAlias, overload, runtime_checkable
 
 # Third-party Modules:
 from knickknacks.typedef import Self
@@ -179,6 +180,150 @@ class IRCServerConnectionType(Protocol):
 
 
 @runtime_checkable
+class URLExtractType(Protocol):
+	"""Protocol for URLExtract."""
+
+	def __init__(
+		self,
+		extract_email: bool = False,
+		cache_dns: bool = True,
+		extract_localhost: bool = True,
+		limit: int = ...,
+		allow_mixed_case_hostname: bool = True,
+		**kwargs: Any,
+	) -> None: ...
+
+	@overload
+	def find_urls(
+		self,
+		text: str,
+		only_unique: bool = ...,
+		check_dns: bool = ...,
+		get_indices: Literal[False] = ...,
+		with_schema_only: bool = ...,
+	) -> list[str]: ...
+
+	@overload
+	def find_urls(
+		self,
+		text: str,
+		only_unique: bool = ...,
+		check_dns: bool = ...,
+		*,
+		get_indices: Literal[True],
+		with_schema_only: bool = ...,
+	) -> list[tuple[str, tuple[int, int]]]: ...
+
+	@overload
+	def find_urls(
+		self,
+		text: str,
+		only_unique: bool = ...,
+		check_dns: bool = ...,
+		get_indices: bool = ...,
+		with_schema_only: bool = ...,
+	) -> list[str | tuple[str, tuple[int, int]]]: ...
+
+	@overload
+	def gen_urls(
+		self,
+		text: str,
+		check_dns: bool = ...,
+		get_indices: Literal[False] = ...,
+		with_schema_only: bool = ...,
+	) -> Generator[str, None, None]: ...
+
+	@overload
+	def gen_urls(
+		self,
+		text: str,
+		check_dns: bool = ...,
+		*,
+		get_indices: Literal[True],
+		with_schema_only: bool = ...,
+	) -> Generator[tuple[str, tuple[int, int]], None, None]: ...
+
+	@overload
+	def gen_urls(
+		self,
+		text: str,
+		check_dns: bool = ...,
+		get_indices: bool = ...,
+		with_schema_only: bool = ...,
+	) -> Generator[str | tuple[str, tuple[int, int]], None, None]: ...
+
+	def has_urls(
+		self,
+		text: str,
+		check_dns: bool = False,
+		with_schema_only: bool = False,
+	) -> bool: ...
+
+	def update(self) -> bool: ...
+
+	def update_when_older(self, days: int) -> bool: ...
+
+	def add_enclosure(self, left_char: str, right_char: str) -> None: ...
+
+	def remove_enclosure(self, left_char: str, right_char: str) -> None: ...
+
+	def get_enclosures(self) -> set[tuple[str, str]]: ...
+
+	def get_after_tld_chars(self) -> list[str]: ...
+
+	def set_after_tld_chars(self, after_tld_chars: Iterable[str]) -> None: ...
+
+	def get_stop_chars_left(self) -> set[str]: ...
+
+	def set_stop_chars_left(self, stop_chars: AbstractSet[str]) -> None: ...
+
+	def get_stop_chars_right(self) -> set[str]: ...
+
+	def set_stop_chars_right(self, stop_chars: AbstractSet[str]) -> None: ...
+
+	def get_stop_chars_left_from_scheme(self) -> set[str]: ...
+
+	def set_stop_chars_left_from_scheme(self, stop_chars: AbstractSet[str]) -> None: ...
+
+	def load_ignore_list(self, file_name: str) -> None: ...
+
+	def load_permit_list(self, file_name: str) -> None: ...
+
+	@property
+	def ignore_list(self) -> set[str]: ...
+
+	@ignore_list.setter
+	def ignore_list(self, value: AbstractSet[str]) -> None: ...
+
+	@property
+	def permit_list(self) -> set[str]: ...
+
+	@permit_list.setter
+	def permit_list(self, value: AbstractSet[str]) -> None: ...
+
+	@property
+	def extract_email(self) -> bool: ...
+
+	@extract_email.setter
+	def extract_email(self, value: bool) -> None: ...
+
+	@property
+	def extract_localhost(self) -> bool: ...
+
+	@extract_localhost.setter
+	def extract_localhost(self, value: bool) -> None: ...
+
+	@property
+	def allow_mixed_case_hostname(self) -> bool: ...
+
+	@allow_mixed_case_hostname.setter
+	def allow_mixed_case_hostname(self, value: bool) -> None: ...
+
+	@staticmethod
+	def get_version() -> str: ...
+
+
+@runtime_checkable
 class WXNotebookType(Protocol):
 	"""Protocol for wx.Notebook methods/properties we use."""
 
@@ -237,6 +382,7 @@ __all__: list[str] = [
 	"NickMaskType",
 	"Self",
 	"SocketWrapperType",
+	"URLExtractType",
 	"WXListCtrlType",
 	"WXNotebookType",
 ]

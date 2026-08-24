@@ -26,6 +26,7 @@ import re
 import ssl
 import sys
 import threading
+import webbrowser
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import suppress
@@ -44,6 +45,7 @@ import wx.adv
 from knickknacks.backports import StrEnum
 from knickknacks.numbers import clamp
 from speechlight import speech
+from urlextract import URLExtract
 
 # Local Modules:
 from .config import Config
@@ -56,6 +58,7 @@ from .typedef import (
 	IRCServerConnectionType,
 	NickMaskType,
 	SocketWrapperType,
+	URLExtractType,
 	WXListCtrlType,
 	WXNotebookType,
 )
@@ -166,6 +169,10 @@ NUMERIC_MESSAGES: Final[dict[str, str]] = {
 
 # Globals:
 logger: Final[logging.Logger] = logging.getLogger(__name__)
+url_extractor: Final[URLExtractType] = URLExtract()
+
+# Update cached TLD list if older than 7 days.
+url_extractor.update_when_older(7)
 
 
 def get_numeric_name(numeric: str) -> str:
@@ -1546,10 +1553,12 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		self._lower_volume_id = wx.NewIdRef()
 		self._raise_volume_id = wx.NewIdRef()
 		self._minimize_to_tray_id = wx.NewIdRef()
+		self._extract_urls_id = wx.NewIdRef()
 		accel = wx.AcceleratorTable(
 			[
 				(wx.ACCEL_CTRL, ord("W"), wx.ID_CLOSE),
 				(wx.ACCEL_CTRL, wx.WXK_F4, wx.ID_CLOSE),
+				(wx.ACCEL_NORMAL, wx.WXK_F3, self._extract_urls_id),
 				(wx.ACCEL_NORMAL, wx.WXK_F5, self._speech_enable_globally_id),
 				(wx.ACCEL_NORMAL, wx.WXK_F6, self._speech_disable_globally_id),
 				(wx.ACCEL_CTRL, wx.WXK_F5, self._speech_enable_current_tab_id),
@@ -1561,6 +1570,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		)
 		self.SetAcceleratorTable(accel)
 		self.Bind(wx.EVT_MENU, self.on_close_tab, id=wx.ID_CLOSE)
+		self.Bind(wx.EVT_MENU, self.on_extract_urls, id=self._extract_urls_id)
 		self.Bind(wx.EVT_MENU, self.enable_speech_globally, id=self._speech_enable_globally_id)
 		self.Bind(wx.EVT_MENU, self.disable_speech_globally, id=self._speech_disable_globally_id)
 		self.Bind(wx.EVT_MENU, self.enable_speech_for_current_tab, id=self._speech_enable_current_tab_id)
@@ -2223,6 +2233,26 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		if self.IsShown():
 			self.Hide()
 
+	def on_extract_urls(self, event: Any | None = None) -> None:
+		"""
+		Extract URLs from the current tab's output and show the URL list dialog.
+
+		Args:
+			event: The accelerator/menu event (unused).
+		"""
+		panel: TabPanel | None = self.current_tab
+		if panel is None:
+			return
+		text: str = panel.output.GetValue()
+		# Extract URLs and remove oldest duplicates while preserving order.
+		urls: list[str] = list(reversed(dict.fromkeys(reversed(url_extractor.find_urls(text)))))
+		if not urls:
+			wx.MessageBox("No URLs found in the current tab.", "URLs", wx.OK | wx.ICON_INFORMATION)
+			return
+		dlg = UrlListDialog(self, urls)
+		dlg.ShowModal()
+		dlg.Destroy()
+
 
 class ConnectDialog(wx.Dialog):  # type: ignore[no-any-unimported, misc]
 	"""Modal dialog for entering server connection details and credentials."""
@@ -2382,6 +2412,114 @@ class ListChannelsDialog(wx.Dialog):  # type: ignore[no-any-unimported, misc]
 			return None
 		full: str = self.channel_list.GetItemText(idx)
 		return full.split(maxsplit=1)[0]
+
+
+class UrlListDialog(wx.Dialog):  # type: ignore[no-any-unimported, misc]
+	"""Modal dialog listing extracted URLs with Open and Copy to Clipboard actions."""
+
+	def __init__(self, parent: Any, urls: Sequence[str]) -> None:
+		"""
+		Build the URL list dialog.
+
+		Args:
+			parent: The parent window (MainFrame).
+			urls: Sequence of URL strings to display.
+		"""
+		super().__init__(parent, title="URLs", size=(650, 400))
+		sizer = wx.BoxSizer(wx.VERTICAL)
+		sizer.Add(wx.StaticText(self, label="Extracted URLs:"), 0, wx.ALL, 5)
+		self.url_list: WXListCtrlType = wx.ListCtrl(
+			self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL | wx.LC_NO_HEADER
+		)
+		self.url_list.InsertColumn(0, "URL", width=620)
+		self.url_list.SetBackgroundColour(wx.BLACK)
+		self.url_list.SetForegroundColour(wx.WHITE)
+		self.url_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self._on_url_selected)
+		self.url_list.Bind(wx.EVT_LIST_ITEM_DESELECTED, self._on_url_deselected)
+		self.url_list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self.on_open)
+		sizer.Add(self.url_list, 1, wx.EXPAND | wx.ALL, 5)
+		for url in urls:
+			self.url_list.InsertItem(self.url_list.GetItemCount(), url)
+		if urls:
+			self.url_list.Select(0)
+			self.url_list.Focus(0)
+		btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
+		self.open_btn = wx.Button(self, wx.ID_OK, "&Open")
+		self.open_btn.SetDefault()
+		self.open_btn.Bind(wx.EVT_BUTTON, self.on_open)
+		self.copy_btn = wx.Button(self, wx.ID_ANY, "&Copy to Clipboard")
+		self.copy_btn.Bind(wx.EVT_BUTTON, self.on_copy)
+		cancel_btn = wx.Button(self, wx.ID_CANCEL, "Cancel")
+		btn_sizer.Add(self.open_btn, 0, wx.ALL, 5)
+		btn_sizer.Add(self.copy_btn, 0, wx.ALL, 5)
+		btn_sizer.Add(cancel_btn, 0, wx.ALL, 5)
+		sizer.Add(btn_sizer, 0, wx.ALIGN_RIGHT | wx.ALL, 5)
+		self.SetSizer(sizer)
+		self.url_list.SetFocus()
+
+	def _on_url_selected(self, event: Any) -> None:
+		"""Highlight the selected URL row."""
+		idx: int = event.GetIndex()
+		if idx != -1:
+			self.url_list.SetItemTextColour(idx, wx.BLACK)
+			self.url_list.SetItemBackgroundColour(idx, wx.WHITE)
+		event.Skip()
+
+	def _on_url_deselected(self, event: Any) -> None:
+		"""Restore default colors when a URL row is deselected."""
+		idx: int = event.GetIndex()
+		if idx != -1:
+			self.url_list.SetItemTextColour(idx, wx.WHITE)
+			self.url_list.SetItemBackgroundColour(idx, wx.BLACK)
+		event.Skip()
+
+	def get_selected_url(self) -> str | None:
+		"""
+		Return the currently selected URL string, or None if nothing is selected.
+
+		Returns:
+			The selected URL or None.
+		"""
+		idx: int = self.url_list.GetFirstSelected()
+		if idx == -1:
+			return None
+		return self.url_list.GetItemText(idx)
+
+	def on_open(self, event: Any | None = None) -> None:
+		"""
+		Open the selected URL in the system default web browser (cross-platform).
+
+		Triggered by the Open button, Enter on the button, or Enter/double-click
+		on a list item.
+		"""
+		url = self.get_selected_url()
+		if not url:
+			wx.Bell()
+			return
+		# Ensure the URL has a scheme so the system browser can open it.
+		if not url.lower().startswith(("http://", "https://")):
+			url = f"https://{url}"
+		webbrowser.open(url)
+		self.EndModal(wx.ID_OK)
+
+	def on_copy(self, event: Any | None = None) -> None:
+		"""
+		Copy the selected URL to the system clipboard (cross-platform via wx).
+
+		The dialog stays open so the user can open or copy additional URLs.
+		"""
+		url = self.get_selected_url()
+		if not url:
+			wx.Bell()
+			return
+		if wx.TheClipboard.Open():
+			try:
+				wx.TheClipboard.SetData(wx.TextDataObject(url))
+			finally:
+				wx.TheClipboard.Close()
+			speech.output("Copied to clipboard", interrupt=True)
+		else:
+			wx.Bell()
 
 
 class TrayIcon(wx.adv.TaskBarIcon):  # type: ignore[no-any-unimported, misc]
