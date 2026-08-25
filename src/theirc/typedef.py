@@ -180,6 +180,24 @@ class IRCServerConnectionType(Protocol):
 
 
 @runtime_checkable
+class PySTrayIconType(Protocol):
+	"""Protocol for pystray.Icon."""
+
+	def __init__(
+		self,
+		name: str,
+		icon: Any | None = None,
+		title: str | None = None,
+		menu: Any | None = None,
+		**kwargs: Any,
+	) -> None: ...
+
+	def run(self) -> None: ...
+
+	def stop(self) -> None: ...
+
+
+@runtime_checkable
 class URLExtractType(Protocol):
 	"""Protocol for URLExtract."""
 
@@ -389,6 +407,7 @@ __all__: list[str] = [
 	"IRCEventType",
 	"IRCServerConnectionType",
 	"NickMaskType",
+	"PySTrayIconType",
 	"Self",
 	"SocketWrapperType",
 	"URLExtractType",

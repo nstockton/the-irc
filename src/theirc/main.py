@@ -40,10 +40,11 @@ import irc.client
 import irc.connection
 import irc.events
 import jaraco.functools
+import pystray
 import wx
-import wx.adv
 from knickknacks.backports import StrEnum
 from knickknacks.numbers import clamp
+from PIL import Image
 from speechlight import speech
 from urlextract import URLExtract
 
@@ -57,6 +58,7 @@ from .typedef import (
 	IRCEventType,
 	IRCServerConnectionType,
 	NickMaskType,
+	PySTrayIconType,
 	SocketWrapperType,
 	URLExtractType,
 	WXListBoxType,
@@ -2119,7 +2121,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		self._shutdown_finished = True
 		if self.tray_icon is not None:
 			with suppress(Exception):
-				self.tray_icon.RemoveIcon()
+				self.tray_icon.stop()
 			self.tray_icon = None
 		if self.irc_thread and self.irc_thread.is_alive():
 			self.irc_thread.join(timeout=0.8)
@@ -2453,73 +2455,60 @@ class UrlListDialog(wx.Dialog):  # type: ignore[no-any-unimported, misc]
 			wx.Bell()
 
 
-class TrayIcon(wx.adv.TaskBarIcon):  # type: ignore[no-any-unimported, misc]
+class TrayIcon:
 	"""
-	System tray / menu bar extra icon for minimizing the main window to tray equivalent.
+	System tray icon implemented with pystray.
 
-	Pressing Escape on the main window hides it (minimizes to tray). The tray icon
-	allows restoring the window (left double-click or menu) or quitting the app.
+	The icon runs in a background thread so it does not interfere with the wxPython main loop.
 	"""
 
-	def __init__(self, frame: MainFrame) -> None:
+	def __init__(self, main_frame: MainFrame) -> None:
 		"""
-		Initialize tray icon with a generic icon and tooltip.
+		Create the system tray icon.
 
 		Args:
-			frame: The parent frame.
+			main_frame: Reference to the MainFrame.
 		"""
-		super().__init__()
-		self.frame: MainFrame = frame
-		# Cross-platform fallback icon.
-		bmp: Any = wx.ArtProvider.GetBitmap(wx.ART_INFORMATION, wx.ART_OTHER, (16, 16))
-		icon: Any = wx.Icon()
-		icon.CopyFromBitmap(bmp)
-		self.SetIcon(icon, WINDOW_TITLE)
-		# Double-click is the conventional way to restore from tray.
-		self.Bind(wx.adv.EVT_TASKBAR_LEFT_DCLICK, self.on_left_dclick)
-		self.Bind(wx.adv.EVT_TASKBAR_LEFT_UP, self.on_left_up)
+		self.main_frame = main_frame
+		self._icon: PySTrayIconType | None = None
+		self._thread: threading.Thread | None = None
+		image = Image.new("RGBA", (64, 64), (70, 130, 180, 255))
+		menu = pystray.Menu(
+			pystray.MenuItem("Restore Window", self.on_restore, default=True),
+			pystray.MenuItem("Exit", self.on_quit),
+		)
+		self._icon = pystray.Icon(
+			name="the-irc",
+			icon=image,
+			title=WINDOW_TITLE,
+			menu=menu,
+		)
+		self._thread = threading.Thread(target=self._icon.run, daemon=True)
+		self._thread.start()
 
-	def CreatePopupMenu(self) -> Any:
-		"""
-		Create right-click context menu for the tray icon.
+	def on_restore(self, icon: Any = None, item: Any = None) -> None:
+		"""Restore the main window."""
+		wx.CallAfter(self._do_restore)
 
-		Returns:
-			The wx.Menu object.
-		"""
-		menu = wx.Menu()
-		restore_item = menu.Append(wx.ID_ANY, "&Restore Window\tEsc", "Restore the main window from tray")
-		self.Bind(wx.EVT_MENU, self.on_restore, restore_item)
-		menu.AppendSeparator()
-		quit_item = menu.Append(wx.ID_EXIT, "E&xit\tAlt-F4", "Exit the IRC client")
-		self.Bind(wx.EVT_MENU, self.on_quit, quit_item)
-		return menu
-
-	def on_left_dclick(self, event: Any) -> None:
-		"""Double-click on tray icon restores the window."""
-		self.on_restore(event)
-
-	def on_left_up(self, event: Any) -> None:
-		"""Single left-click also restores (platform dependent behavior)."""
-		self.on_restore(event)
-
-	def on_restore(self, event: Any | None = None) -> None:
-		"""Show and bring the main frame to front (if it was hidden/minimized to tray)."""
-		# Tray icon remains visible (persistent tray support).
-		if not self.frame.IsShown():
-			self.frame.Show()
-			self.frame.Raise()
-			self.frame.SetFocus()
-			panel: TabPanel | None = self.frame.current_tab
+	def _do_restore(self) -> None:
+		if not self.main_frame.IsShown():
+			self.main_frame.Show()
+			self.main_frame.Raise()
+			self.main_frame.SetFocus()
+			panel: TabPanel | None = self.main_frame.current_tab
 			if panel is not None:
 				panel.input.SetFocus()
 
-	def on_quit(self, event: Any | None = None) -> None:
-		"""Exit the application via the tray menu (reuses existing quit logic)."""
-		try:
-			self.frame.on_exit(None)
-		except Exception:
-			wx.Exit()
-			raise
+	def on_quit(self, icon: Any = None, item: Any = None) -> None:
+		"""Quit the application."""
+		wx.CallAfter(self.main_frame.on_exit, None)
+
+	def stop(self) -> None:
+		"""Stop the tray icon (called during shutdown)."""
+		if self._icon is not None:
+			with suppress(Exception):
+				self._icon.stop()
+			self._icon = None
 
 
 def run() -> None:  # pragma: no cover

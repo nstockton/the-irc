@@ -84,7 +84,6 @@ excludes: list[str] = [
 	"pyreadline",
 	"optparse",
 	"numpy",
-	"PIL",
 	"xml",
 ]
 
