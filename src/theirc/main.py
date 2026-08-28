@@ -866,8 +866,9 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			connection: The active server connection.
 			event: The RPL_TOPIC event.
 		"""
+		# The library moves the recipient nick into event.target, so arguments should be [channel, topic].
 		if len(event.arguments) >= 2:
-			_, channel, *topic = event.arguments
+			channel, *topic = event.arguments
 			self.log_system_message(f"Topic for {channel}: {' '.join(topic)}")
 
 	def on_mode(self, connection: IRCServerConnectionType, event: IRCEventType) -> None:
