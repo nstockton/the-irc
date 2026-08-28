@@ -1820,9 +1820,19 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 				speech.output(
 					f"{'' if is_current_tab else preamble}{message_info.formatted_text}", interrupt=False
 				)
-			if message_info.is_mentioned and not is_current_tab and message_info.target != STATUS_TAB_NAME:
-				# User was mentioned outside of the status and currently selected tabs.
+			is_hidden: bool = not self.IsShown()
+			if (
+				message_info.is_mentioned
+				and message_info.target != STATUS_TAB_NAME
+				and (not is_current_tab or is_hidden)
+			):
+				# User was mentioned outside of the status tab.
 				self.play_notification_sound(MENTIONED_SOUND)
+				if is_hidden:
+					# Window is hidden in the system tray; send a desktop notification.
+					self.show_tray_notification(
+						message_info.formatted_text, f"Mentioned in {message_info.target}"
+					)
 		panel.append_text(message_info.formatted_text)
 
 	def update_nick_list(self, tab_name: str) -> None:
@@ -2006,6 +2016,18 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 			sound_path: The path to the sound file to play.
 		"""
 		play_sound(sound_path, volume=self._sound_volume)
+
+	def show_tray_notification(self, message: str, title: str | None = None) -> None:
+		"""
+		Show a system tray notification if the platform supports it.
+
+		Args:
+			message: Notification body.
+			title: Notification title.
+		"""
+		if self.tray_icon is None:
+			return
+		self.tray_icon.notify(message, title)
 
 	def _send_message(self, message_info: MessageInfo) -> None:
 		"""
@@ -2502,6 +2524,20 @@ class TrayIcon:
 	def on_quit(self, icon: Any = None, item: Any = None) -> None:
 		"""Quit the application."""
 		wx.CallAfter(self.main_frame.on_exit, None)
+
+	def notify(self, message: str, title: str | None = None) -> None:
+		"""
+		Display a system notification from the tray icon.
+
+		Args:
+			message: Notification body.
+			title: Notification title.
+		"""
+		icon = self._icon
+		if icon is None or not getattr(icon, "HAS_NOTIFICATION", False):
+			return
+		with suppress(Exception):
+			icon.notify(message, title)
 
 	def stop(self) -> None:
 		"""Stop the tray icon (called during shutdown)."""
