@@ -44,6 +44,7 @@ import pystray
 import wx
 from knickknacks.backports import StrEnum
 from knickknacks.numbers import clamp
+from knickknacks.typedef import override
 from PIL import Image
 from speechlight import speech
 from urlextract import URLExtract
@@ -341,10 +342,24 @@ class StoppableExponentialBackoff(irc.bot.ExponentialBackoff):  # type: ignore[n
 		"""Signal that no further reconnection attempts should be made."""
 		self._finished.set()
 
+	@override
 	def run(self, *args: Any, **kwargs: Any) -> None:
 		"""Run the backoff loop unless a stop has been requested."""
 		if not self._finished.is_set():
 			super().run(*args, **kwargs)
+
+	@override
+	def check(self) -> None:
+		"""
+		Do not reconnect if stop has been requested.
+
+		The parent check calls jump_server if not connected,
+		so a timer scheduled before stop could otherwise reconnect after quit/disconnect.
+		"""
+		if self._finished.is_set():
+			self._check_scheduled = False
+			return
+		super().check()
 
 
 class BatchTypeEnum(StrEnum):
@@ -469,6 +484,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			verify_ssl: Whether to verify the server certificate (ignored if use_tls=False).
 		"""
 		self.gui: Any = gui
+		self._is_reactor_stopped: threading.Event = threading.Event()
 		self._cap_end_sent: bool = False
 		self._desired_caps: set[str] = {
 			"echo-message",
@@ -566,6 +582,19 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		if nick_mask.nick == self.connection.get_nickname() and nick_mask.userhost is not None:
 			self._our_nick_mask = nick_mask
 			logger.debug(f"Updated nick mask: {nick_mask}")
+
+	@override
+	def start(self) -> None:
+		"""Run the IRC reactor until stop_reactor is called."""
+		self._is_reactor_stopped.clear()
+		self._connect()
+		while not self._is_reactor_stopped.is_set():
+			self.reactor.process_once(timeout=0.2)
+
+	def stop_reactor(self) -> None:
+		"""Stop reconnection attempts and request the reactor loop to exit."""
+		self.recon.stop()
+		self._is_reactor_stopped.set()
 
 	def on_whoisuser(self, connection: IRCServerConnectionType, event: IRCEventType) -> None:
 		"""
@@ -1514,7 +1543,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		self.wx_port_id: int = wx.PlatformInformation.Get().GetPortId()
 		self._client: IRCClient | None = None
 		self.irc_thread: threading.Thread | None = None
-		self._shutdown_finished: bool = False
+		self._is_shutdown_finished: bool = False
 		self.global_speech_enabled: bool = True
 		self.speech_states: dict[str, dict[str, bool]] = {}  # {server_key: {folded_tab_name: enabled}}
 		self._load_speech_states()
@@ -1559,6 +1588,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		self.Bind(wx.EVT_MENU, self.raise_sound_volume, id=self._raise_volume_id)
 		self.Bind(wx.EVT_MENU, self.minimize_to_tray, id=self._minimize_to_tray_id)
 		self.notebook.Bind(wx.EVT_NOTEBOOK_PAGE_CHANGED, self._on_tab_changed)
+		self.Bind(wx.EVT_CLOSE, self.on_exit)
 		self.Show()
 		self.create_tab(STATUS_TAB_NAME, auto_focus=True)
 		self._update_window_title()
@@ -2081,7 +2111,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		cmd: str = parts[0].upper()
 		args: str = parts[1].strip() if len(parts) >= 2 else ""
 		if cmd == "QUIT":
-			self.client.quit("Client exiting")
+			self.client.quit(args or "Client exiting")
 			return
 		if cmd in {"JOIN", "J"}:
 			join_parts: list[str] = args.split(maxsplit=1)  # Channel, key.
@@ -2128,26 +2158,36 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		Cleanly shut down the IRC connection and close the application.
 
 		Args:
-			event: The menu/accelerator event.
+			event: The menu/accelerator/close event.
 		"""
+		if self._is_shutdown_finished:
+			if event is not None and hasattr(event, "Skip"):
+				event.Skip()
+			return
 		if self.is_connected:
 			self.client.quit_with_callback(self._finish_shutdown, "Client exiting")
 			# Safety net: force shutdown after 5 seconds if callback never fires.
 			wx.CallLater(5000, self._finish_shutdown)
-		else:
-			self._finish_shutdown()
+			# Keep the window alive until QUIT completes (or the timer fires).
+			if event is not None and hasattr(event, "Veto"):
+				event.Veto()
+			return
+		self._finish_shutdown()
 
 	def _finish_shutdown(self) -> None:
 		"""Join the IRC thread (if running), clean up tray icon, and destroy the wx frame."""
-		if self._shutdown_finished:
+		if self._is_shutdown_finished:
 			return
-		self._shutdown_finished = True
+		self._is_shutdown_finished = True
 		if self.tray_icon is not None:
 			with suppress(Exception):
 				self.tray_icon.stop()
 			self.tray_icon = None
+		if self._client is not None:
+			with suppress(Exception):
+				self._client.stop_reactor()
 		if self.irc_thread and self.irc_thread.is_alive():
-			self.irc_thread.join(timeout=0.8)
+			self.irc_thread.join(timeout=1.5)
 		self.Destroy()
 		wx.GetApp().ExitMainLoop()
 
@@ -2169,11 +2209,15 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 				return
 			with Config(CONFIG_NAME) as cfg:
 				cfg.update(data)
-			if self.is_connected:
-				# Stop reconnection attempts and drop the old connection before
-				# replacing the client instance.
-				self.client.recon.stop()
-				self.client.disconnect()
+			if self._client is not None:
+				# Always stop the previous client's reactor thread before disconnect.
+				with suppress(Exception):
+					self._client.stop_reactor()
+				if self.is_connected:
+					with suppress(Exception):
+						self._client.disconnect()
+				if self.irc_thread is not None and self.irc_thread.is_alive():
+					self.irc_thread.join(timeout=1.5)
 			self._client = IRCClient(
 				gui=self,
 				server=data["server"],
@@ -2200,6 +2244,10 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		"""
 		if self.is_connected:
 			self.client.quit("Client exiting")
+			# Stay in a disconnecting state until on_disconnect updates the menu.
+			self.connect_item.Enable(enable=False)
+			self.disconnect_item.Enable(enable=False)
+			return
 		self.update_server_menu_state()
 
 	def update_server_menu_state(self) -> None:
