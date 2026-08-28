@@ -584,6 +584,19 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			logger.debug(f"Updated nick mask: {nick_mask}")
 
 	@override
+	def _connect(self) -> None:
+		"""Reset session flags and establish the socket."""
+		self._cap_end_sent = False
+		self.echo_message_enabled = False
+		self.chathistory_enabled = False
+		self.labeled_response_enabled = False
+		self._our_labels.clear()
+		self._pending_echo_counts.clear()
+		self.feature_list.clear()
+		self.batches.clear()
+		super()._connect()
+
+	@override
 	def start(self) -> None:
 		"""Run the IRC reactor until stop_reactor is called."""
 		self._is_reactor_stopped.clear()
