@@ -2084,10 +2084,11 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 			self.client.quit("Client exiting")
 			return
 		if cmd in {"JOIN", "J"}:
-			if args and irc.client.is_channel(args):
-				self.client.join(args)
+			join_parts: list[str] = args.split(maxsplit=1)  # Channel, key.
+			if join_parts and irc.client.is_channel(join_parts[0]):
+				self.client.join(*join_parts)
 			else:
-				self.log_system_message("Usage: /join #channel")
+				self.log_system_message("Usage: /join #channel [key]")
 		elif cmd in {"PART", "LEAVE", "P"}:
 			channel: str = args or tab_name
 			if channel and irc.client.is_channel(channel):
