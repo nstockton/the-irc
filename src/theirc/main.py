@@ -912,6 +912,19 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 				result.add(name)
 		return result
 
+	def chathistory_limit(self) -> int:
+		"""
+		Calculate a positive CHATHISTORY limit honoring ISUPPORT and the client cap.
+
+		Returns:
+			The CHATHISTORY limit.
+		"""
+		raw = self.feature_list.get("chathistory") or self.feature_list.get("draft/chathistory") or ""
+		if raw.isdigit():
+			# ISUPPORT CHATHISTORY=0 means no advertised maximum.
+			return min(int(raw) or DEFAULT_HISTORY_LENGTH, DEFAULT_HISTORY_LENGTH)
+		return DEFAULT_HISTORY_LENGTH
+
 	def on_disconnect(self, connection: IRCServerConnectionType, event: IRCEventType) -> None:
 		"""
 		Handle unexpected or requested disconnection from the server.
@@ -1885,13 +1898,8 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 			if folded_tab_name != STATUS_TAB_NAME and self.is_connected and self.client.chathistory_enabled:
 				# We intentionally request chat history for both channels and private messages.
 				# This should still be fine even if the server only supports chat history for channels.
-				logger.debug(f"Requesting CHATHISTORY for tab: {tab_name}")
-				num_lines_str = (
-					self.client.feature_list.get("chathistory")
-					or self.client.feature_list.get("draft/chathistory")
-					or ""
-				)
-				num_lines = int(num_lines_str) if num_lines_str.isdigit() else DEFAULT_HISTORY_LENGTH
+				num_lines = self.client.chathistory_limit()
+				logger.debug(f"Requesting CHATHISTORY for tab: {tab_name} limit={num_lines}")
 				self.client.send_raw(f"CHATHISTORY LATEST {tab_name} * {num_lines}")
 		if auto_focus:
 			self.select_tab(panel)
