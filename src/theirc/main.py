@@ -77,6 +77,8 @@ MENTIONED_SOUND: Final[Path] = SOUND_DIR / "mentioned.wav"
 VOLUME_DOWN_SOUND: Final[Path] = SOUND_DIR / "volume_down.wav"
 VOLUME_UP_SOUND: Final[Path] = SOUND_DIR / "volume_up.wav"
 STATUS_TAB_NAME: Final[str] = "$status"
+# Never open a query tab for these.
+STATUS_LIKE_TARGETS: Final[frozenset[str]] = frozenset({STATUS_TAB_NAME, "*", "auth"})
 PRIVILEGES: Final[dict[str, tuple[int, str]]] = {
 	"owner": (5, "is_owner"),
 	"admin": (4, "is_admin"),
@@ -205,6 +207,22 @@ def get_numeric_name(numeric: str) -> str:
 		# Numeric is already a valid name.
 		return numeric
 	raise ValueError(f"Numeric name not found: {numeric!r}")
+
+
+def is_status_like(target: str) -> bool:
+	"""
+	Tests if a target is status-like and thus prevented from opening a query tab.
+
+	Args:
+		target: the target to test.
+
+	Returns:
+		True if target is status-like, False otherwise.
+	"""
+	if not target or target.casefold() in STATUS_LIKE_TARGETS:
+		return True
+	# Server names look like hostnames and are not channels.
+	return not irc.client.is_channel(target) and "." in target
 
 
 def extract_tags(tags: Sequence[Mapping[str, Any]]) -> dict[str, str]:
@@ -1086,12 +1104,16 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 					if self._pending_echo_counts[message_info.text] == 0:
 						del self._pending_echo_counts[message_info.text]
 				return
-		if message_info.folded_target == folded_our_nick:
+		if is_status_like(message_info.target):
+			# Registration and server-wide notices belong on the status tab.
+			message_info.target = STATUS_TAB_NAME
+		elif message_info.folded_target == folded_our_nick:
 			# Message is an incoming private message to us.
 			# The query tab should be named after the person who sent us the direct message, not us.
 			message_info.target = message_info.sender
 		message_info.is_mentioned = bool(
 			not message_info.history_target
+			and message_info.target != STATUS_TAB_NAME
 			and re.search(rf"\b{re.escape(folded_our_nick)}\b", message_info.folded_text)
 		)
 		wx.CallAfter(self.gui.append_to_output, message_info)
