@@ -658,6 +658,18 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		self._cap_end_sent = True
 		self.connection.cap("END")
 
+	def on_login_failed(self, connection: IRCServerConnectionType, event: IRCEventType) -> None:
+		"""
+		Handle SASL unavailable or refused.
+
+		Registration still continues unauthenticated; surface the failure on the status tab.
+
+		Args:
+			connection: The active server connection.
+			event: The login_failed event.
+		"""
+		self.log_system_message(f"Login failed: {' '.join(event.arguments) or 'unknown reason'}")
+
 	def log_system_message(self, msg: str) -> None:
 		"""
 		Append a system/status message to the status tab in the GUI thread.
