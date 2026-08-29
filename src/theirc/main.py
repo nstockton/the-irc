@@ -211,6 +211,25 @@ def get_numeric_name(numeric: str) -> str:
 	raise ValueError(f"Numeric name not found: {numeric!r}")
 
 
+def nick_is_mentioned(nick: str, text: str) -> bool:
+	"""
+	Tests if a nickname is mentioned in text.
+
+	Args:
+		nick: a nickname.
+		text: Some text.
+
+	Returns:
+		True if nick is mentioned inside text, False otherwise.
+	"""
+	if not nick or not text:
+		return False
+	escaped = re.escape(nick)
+	# RFC 2812 nick characters.
+	nick_char_class = r"A-Za-z0-9_\[\]\\`^{|}-"
+	return re.search(rf"(?:^|[^{nick_char_class}]){escaped}(?:[^{nick_char_class}]|$)", text) is not None
+
+
 def is_status_like(target: str) -> bool:
 	"""
 	Tests if a target is status-like and thus prevented from opening a query tab.
@@ -1169,7 +1188,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		message_info.is_mentioned = bool(
 			not message_info.history_target
 			and message_info.target != STATUS_TAB_NAME
-			and re.search(rf"\b{re.escape(folded_our_nick)}\b", message_info.folded_text)
+			and nick_is_mentioned(folded_our_nick, message_info.folded_text)
 		)
 		wx.CallAfter(self.gui.append_to_output, message_info)
 
