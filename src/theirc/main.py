@@ -2275,6 +2275,9 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		if text.startswith("/"):
 			self.user_command(tab_name, text)
 			return
+		if tab_name.casefold() == STATUS_TAB_NAME:
+			self.log_system_message("Cannot send messages on the status tab.")
+			return
 		message_info = MessageInfo(
 			text=text, target=tab_name, sender=self.client.connection.get_nickname(), is_action=False
 		)
@@ -2315,7 +2318,9 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 			else:
 				self.log_system_message("Usage: /query <nick>")
 		elif cmd == "ME":
-			if args:
+			if tab_name.casefold() == STATUS_TAB_NAME:
+				self.log_system_message("Cannot send an action on the status tab.")
+			elif args:
 				message_info = MessageInfo(
 					text=args, target=tab_name, sender=self.client.connection.get_nickname(), is_action=True
 				)
