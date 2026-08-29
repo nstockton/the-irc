@@ -1404,15 +1404,10 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			connection: The active server connection.
 			event: The error event.
 		"""
+		# Always pick an alternate nick immediately.
+		# After SASL we still try to reclaim the original nick (account-owned nicks, ghost sessions, etc).
 		if self.is_sasl_in_progress:
-			# SASL authentication is currently in progress during registration.
-			# Defer nick change. After successful SASL we will attempt to reclaim
-			# the original/desired nickname (account-owned nicks, ghost sessions, etc.).
 			self._sasl_deferred_nick_collision = True
-			self.log_system_message(
-				f"Nickname {''.join(event.arguments[:1])!r} is in use; deferring change until SASL completes."
-			)
-			return
 		self._nick_attempt += 1
 		new_nick: str = f"{self._base_nickname}_{self._nick_attempt}"
 		self.log_system_message(f"Nickname in use, trying {new_nick}...")
