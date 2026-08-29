@@ -26,6 +26,7 @@ import re
 import ssl
 import sys
 import threading
+import time
 import webbrowser
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -98,6 +99,7 @@ DEFAULT_PORT: Final[int] = 6697
 DEFAULT_CLIENT_ID: Final[str] = "computer"
 DEFAULT_CONNECT_FACTORY: Final[FactoryType] = irc.connection.Factory()
 DEFAULT_HISTORY_LENGTH: Final[int] = 1000  # CHATHISTORY request size
+ECHO_PENDING_TTL: Final[float] = 60.0  # Seconds before an unmatched echo-message slot expires.
 NUMERIC_MESSAGES: Final[dict[str, str]] = {
 	# Due to the way jaraco/irc handles IRC events, if a name is associated with a numeric value in the
 	# codes.txt file of jaraco/irc, that name must be used instead.
@@ -606,7 +608,8 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		self._label_counter: int = -1
 		self._our_labels: set[str] = set()
 		# Fallback text-based tracking for servers without labeled-response.
-		self._pending_echo_counts: defaultdict[str, int] = defaultdict(int)
+		# Maps outgoing body text to monotonic timestamps of unmatched sends.
+		self._pending_echoes: defaultdict[str, list[float]] = defaultdict(list)
 		# Register generic handlers for supported numeric events.
 		for code in NUMERIC_MESSAGES:
 			method_name = f"on_{get_numeric_name(code)}"
@@ -691,6 +694,48 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		info: str = event.arguments[-1] if event.arguments else ""
 		self.log_system_message(f"{msg}: {info!r} ({event.type}).")
 
+	def _prune_pending_echoes(self) -> None:
+		"""Drop unmatched echo-message slots that have outlived ECHO_PENDING_TTL."""
+		cutoff: float = time.monotonic() - ECHO_PENDING_TTL
+		stale: list[str] = []
+		for text, stamps in self._pending_echoes.items():
+			fresh = [ts for ts in stamps if ts >= cutoff]
+			if fresh:
+				self._pending_echoes[text] = fresh
+			else:
+				stale.append(text)
+		for text in stale:
+			self._pending_echoes.pop(text, None)
+
+	def _note_outgoing_echo(self, text: str) -> None:
+		"""
+		Record an outgoing message text so a later server echo can be suppressed.
+
+		Args:
+			text: The message text.
+		"""
+		self._prune_pending_echoes()
+		self._pending_echoes[text].append(time.monotonic())
+
+	def _consume_pending_echo(self, text: str) -> bool:
+		"""
+		Consume one unmatched outgoing slot for message text.
+
+		Args:
+			text: The message text.
+
+		Returns:
+			True if a pending slot was consumed, False otherwise.
+		"""
+		self._prune_pending_echoes()
+		stamps: list[float] = self._pending_echoes.get(text, [])
+		if not stamps:
+			return False
+		stamps.pop(0)
+		if not stamps:
+			self._pending_echoes.pop(text, None)
+		return True
+
 	def _update_our_nick_mask(self, nick_mask: NickMaskType) -> None:
 		if nick_mask == self._our_nick_mask:
 			return
@@ -707,7 +752,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		self.chathistory_enabled = False
 		self.labeled_response_enabled = False
 		self._our_labels.clear()
-		self._pending_echo_counts.clear()
+		self._pending_echoes.clear()
 		self.feature_list.clear()
 		self.batches.clear()
 		super()._connect()
@@ -1108,13 +1153,11 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			label: str = tags.get("label", "")
 			matched_label: bool = bool(self.labeled_response_enabled and label and label in self._our_labels)
 			is_source_us: bool = message_info.folded_sender == folded_our_nick
-			has_pending: bool = self._pending_echo_counts.get(message_info.text, 0) > 0
+			has_pending: bool = bool(self._pending_echoes.get(message_info.text))
 			if matched_label or (is_source_us and has_pending):
 				self._our_labels.discard(label)
 				if has_pending:
-					self._pending_echo_counts[message_info.text] -= 1
-					if self._pending_echo_counts[message_info.text] == 0:
-						del self._pending_echo_counts[message_info.text]
+					self._consume_pending_echo(message_info.text)
 				return
 		if is_status_like(message_info.target):
 			# Registration and server-wide notices belong on the status tab.
@@ -1396,7 +1439,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		for chunk in chunks:
 			tags: list[str] = []
 			if self.echo_message_enabled:
-				self._pending_echo_counts[chunk] += 1
+				self._note_outgoing_echo(chunk)
 				if self.labeled_response_enabled:
 					label: str = self._next_label()
 					self._our_labels.add(label)
