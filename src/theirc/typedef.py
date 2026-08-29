@@ -149,10 +149,14 @@ class ChannelType(Protocol):
 class IRCServerConnectionType(Protocol):
 	"""Protocol for irc.client.ServerConnection methods we use."""
 
+	_sasl_step: Callable[[IRCEventType], None] | None
+	_sasl_state_machine: Callable[[Self, IRCEventType], None]
 	connected: bool
 	handlers: dict[str, Callable[..., Any]]
 	reactor: Any
 	server: str
+
+	def remove_global_handler(self, event: str, handler: Callable[..., Any]) -> int: ...
 
 	def cap(self, subcommand: str, *args: Any) -> None: ...
 

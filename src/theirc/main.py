@@ -236,6 +236,29 @@ def extract_tags(tags: Sequence[Mapping[str, Any]]) -> dict[str, str]:
 	return result
 
 
+def split_cap_params(arguments: Sequence[str]) -> tuple[str, bool, list[str]]:
+	"""
+	Split a CAP command's argument list into subcommand, continuation flag, and tokens.
+
+	Handles both `CAP * LS :caps` and multiline `CAP * LS * :caps` forms.
+	The leading `*` continuation marker (if present) is not treated as a capability.
+
+	Args:
+		arguments: event.arguments from a CAP event (subcommand first).
+
+	Returns:
+		A tuple containing subcommand, more_coming, and tokens.
+	"""
+	if not arguments:
+		return "", False, []
+	cmd, *rest = arguments
+	more_coming = bool(rest and rest[0] == "*")
+	if more_coming:
+		rest = rest[1:]
+	tokens = " ".join(rest).split()
+	return cmd, more_coming, tokens
+
+
 class DualAuthConnection(irc.client.ServerConnection):  # type: ignore[no-any-unimported, misc]
 	"""
 	Custom IRC server connection supporting both server password and SASL authentication.
@@ -309,17 +332,60 @@ class DualAuthConnection(irc.client.ServerConnection):  # type: ignore[no-any-un
 			self.pass_(self.server_password)
 		if self.sasl_login and self.password:
 			# Note that the SASL-related stuff is defined internally in irc.client.ServerConnection.
+			# Do *not* use the library's _sasl_cap_ls/_sasl_cap_req steps. Those issue a separate
+			# `CAP REQ sasl` which races with IRCClient.on_cap's combined REQ, triggering AUTHENTICATE twice.
 			self._sasl_step = None
+			self._sasl_offered = False
+			self._sasl_auth_started = False
 			for i in ["cap", "authenticate", "saslsuccess", "saslfail"]:
 				self.add_global_handler(i, self._sasl_state_machine, -42)
-			self._sasl_step = self._sasl_cap_ls
+			self._sasl_step = self._sasl_wait_caps
 		# In the original connect function, CAP LS was
 		# Inside the SASL initialization code above. We move it outside the block so
 		# The code can be used to initiate IRCv3 features when SASL is not used.
-		self.cap("LS")
+		# CAP LS 302 so servers advertise capability values (e.g. sasl=PLAIN).
+		self.cap("LS", "302")
 		self.nick(self.nickname)
 		self.user(self.username, self.ircname)
 		return self
+
+	def _sasl_wait_caps(self, event: IRCEventType) -> None:
+		"""
+		SASL state-machine step that does not send CAP REQ.
+
+		IRCClient.on_cap issues one combined CAP REQ (including sasl when configured).
+		This step only watches LS/ACK/NAK so AUTHENTICATE PLAIN is started exactly once.
+
+		Args:
+			event: The event from IRCClient.on_cap.
+		"""
+		if event.type != "cap" or not event.arguments:
+			return
+		cmd, more_coming, tokens = split_cap_params(event.arguments)
+		cmd = cmd.upper()
+		names = {
+			token.split("=", maxsplit=1)[0].lower() for token in tokens if token and not token.startswith("-")
+		}
+		failed: IRCEventType
+		if cmd == "LS":
+			if "sasl" in names:
+				self._sasl_offered = True
+			if not more_coming and not self._sasl_offered:
+				failed = irc.client.Event("login_failed", event.target, ["server does not support sasl"])
+				self._handle_event(failed)
+				# Do not CAP END here: IRCClient.on_cap still needs to REQ any
+				# non-SASL caps and will end negotiation after that ACK/NAK.
+			return
+		if cmd == "ACK":
+			if "sasl" in names and not self._sasl_auth_started:
+				self._sasl_auth_started = True
+				self.send_items("AUTHENTICATE", "PLAIN")
+				self._sasl_step = self._sasl_auth_plain
+			return
+		if cmd == "NAK" and (not names or "sasl" in names):
+			failed = irc.client.Event("login_failed", event.target, ["server refused sasl protocol"])
+			self._handle_event(failed)
+			self._sasl_end()
 
 
 # Tell the library to use the dual-auth connection class.
@@ -486,6 +552,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		self.gui: Any = gui
 		self._is_reactor_stopped: threading.Event = threading.Event()
 		self._cap_end_sent: bool = False
+		self._pending_ls_caps: set[str] = set()
 		self._desired_caps: set[str] = {
 			"echo-message",
 			"message-tags",
@@ -555,6 +622,24 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		"""True if SASL negotiation is currently in progress, False otherwise."""
 		return bool(getattr(self.connection, "_sasl_step", None))
 
+	def _maybe_cap_end(self) -> None:
+		"""Send CAP END unless SASL still owns the remainder of negotiation."""
+		if self._cap_end_sent:
+			return
+		sasl_offered = bool(getattr(self.connection, "_sasl_offered", False))
+		# When SASL was advertised, DualAuthConnection._sasl_end sends CAP END on 903/fail.
+		if "sasl" in self._desired_caps:
+			if sasl_offered:
+				return
+			# Drop the waiting SASL handlers so they cannot END a second time.
+			conn = self.connection
+			conn._sasl_step = None  # NOQA: SLF001
+			for name in ["cap", "authenticate", "saslsuccess", "saslfail"]:
+				with suppress(Exception):
+					conn.remove_global_handler(name, conn._sasl_state_machine)  # NOQA: SLF001
+		self._cap_end_sent = True
+		self.connection.cap("END")
+
 	def log_system_message(self, msg: str) -> None:
 		"""
 		Append a system/status message to the status tab in the GUI thread.
@@ -587,6 +672,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 	def _connect(self) -> None:
 		"""Reset session flags and establish the socket."""
 		self._cap_end_sent = False
+		self._pending_ls_caps.clear()
 		self.echo_message_enabled = False
 		self.chathistory_enabled = False
 		self.labeled_response_enabled = False
@@ -660,9 +746,9 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 				value = ""
 			self.feature_list[key.strip()] = value.strip()
 
-	def on_cap(self, connection: IRCServerConnectionType, event: IRCEventType) -> None:
+	def on_cap(self, connection: IRCServerConnectionType, event: IRCEventType) -> None:  # NOQA: PLR0912
 		"""
-		Process CAP ACK/NAK replies and enable corresponding feature flags.
+		Process CAP LS/ACK/NAK replies and enable corresponding feature flags.
 
 		Args:
 			connection: The active server connection.
@@ -670,12 +756,21 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		"""
 		if not event.arguments:
 			return
-		cmd: str = event.arguments[0]
-		caps_list: list[str] = " ".join(event.arguments[1:]).split()
+		cmd, more_coming, caps_list = split_cap_params(event.arguments)
+		cmd = cmd.upper()
 		server_caps: set[str] = self._parse_capabilities(caps_list)
-		to_request: list[str] = sorted(self._desired_caps.intersection(server_caps))
-		if cmd == "LS" and to_request:
-			self.connection.cap("REQ", *to_request)
+		if cmd == "LS":
+			self._pending_ls_caps.update(server_caps)
+			if more_coming:
+				return
+			to_request: list[str] = sorted(self._desired_caps.intersection(self._pending_ls_caps))
+			self._pending_ls_caps.clear()
+			if to_request:
+				self.connection.cap("REQ", *to_request)
+				return
+			# Server advertised CAP but none of the caps we want. Still must END
+			# or registration never completes.
+			self._maybe_cap_end()
 			return
 		if cmd == "ACK":
 			if "echo-message" in server_caps:
@@ -698,20 +793,15 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		else:
 			logger.debug(f"[CAP] Server sent an unsupported CAP command: {cmd!r}")
 			return
-		# When SASL authentication is configured, do *not* send CAP END here.
-		# For non-SASL connections, end negotiation now that the server
-		# has replied to our request. The sasl guard protects the
-		# SASL path (library's state machine will send END on 903).
-		if not self._cap_end_sent and "sasl" not in self._desired_caps:
-			self._cap_end_sent = True
-			self.connection.cap("END")
+		self._maybe_cap_end()
 
 	@staticmethod
 	def _parse_capabilities(caps: Iterable[str]) -> set[str]:
 		"""
 		Parse raw capability strings from CAP LS or CAP ACK.
 
-		Strips any values after '=' and ignores disabled capabilities (starting with '-').
+		Strips any values after `=` and ignores disabled capabilities (starting with `-`)
+		and the CAP LS continuation marker `*`.
 
 		Args:
 			caps: An iterable of capabilities to parse.
@@ -721,10 +811,11 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		"""
 		result: set[str] = set()
 		for cap in caps:
-			if not cap.startswith("-"):
-				name = cap.split("=", maxsplit=1)[0]
-				if name:
-					result.add(name)
+			if not cap or cap == "*" or cap.startswith("-"):
+				continue
+			name = cap.split("=", maxsplit=1)[0]
+			if name and name != "*":
+				result.add(name)
 		return result
 
 	def on_disconnect(self, connection: IRCServerConnectionType, event: IRCEventType) -> None:
