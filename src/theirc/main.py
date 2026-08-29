@@ -912,6 +912,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			connection: The active server connection.
 			event: The NICK event.
 		"""
+		old_nick: str = event.source.nick
 		new_nick: str = event.target
 		nick_mask: NickMaskType
 		nick_mask = irc.client.NickMask.from_params(new_nick, event.source.user, event.source.host)
@@ -919,6 +920,9 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		for target in list(self.channels.keys()):
 			if self.channels[target].has_user(new_nick):
 				wx.CallAfter(self.gui.update_nick_list, target)
+		# Follow the remote party when they change nick so the query tab stays attached.
+		if old_nick and old_nick != new_nick and old_nick != connection.get_nickname():
+			wx.CallAfter(self.gui.rename_tab, old_nick, new_nick)
 
 	def on_namreply(self, connection: IRCServerConnectionType, event: IRCEventType) -> None:
 		"""
@@ -1798,6 +1802,63 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		if update_nick_list:
 			self.update_nick_list(tab_name)
 		return panel
+
+	def rename_tab(self, old_name: str, new_name: str) -> None:
+		"""
+		Rename a query tab after a remote NICK change.
+
+		If a tab for new_name already exists, merge the old tab's transcript into it.
+
+		Args:
+			old_name: Previous nickname (current tab title).
+			new_name: New nickname.
+		"""
+		if not old_name or not new_name:
+			return
+		if old_name.casefold() == new_name.casefold():
+			return
+		if old_name.casefold() == STATUS_TAB_NAME or irc.client.is_channel(old_name):
+			return
+		panel = self.get_tab(old_name)
+		if panel is None:
+			return
+		existing = self.get_tab(new_name)
+		if existing is not None and existing is not panel:
+			old_text: str = panel.output.GetValue()
+			existing.append_text(f"*** {old_name} is now known as {new_name}")
+			if old_text:
+				existing.append_text(old_text)
+			self.close_tab(old_name)
+			self._migrate_speech_state(old_name, new_name)
+			return
+		panel.tab_name = new_name
+		panel.is_channel = irc.client.is_channel(new_name)
+		panel.output.SetName(f"Output {new_name}:")
+		idx = self.get_tab_index(panel)
+		if idx != WX_NOT_FOUND:
+			self.notebook.SetPageText(idx, new_name)
+		self._migrate_speech_state(old_name, new_name)
+		self._update_window_title()
+
+	def _migrate_speech_state(self, old_name: str, new_name: str) -> None:
+		"""
+		Move a per-tab speech preference from old_name to new_name.
+
+		Args:
+			old_name: Previous nickname.
+			new_name: New nickname.
+		"""
+		old_fold = old_name.casefold()
+		new_fold = new_name.casefold()
+		if old_fold == new_fold:
+			return
+		changed = False
+		for tabs in self.speech_states.values():
+			if old_fold in tabs:
+				tabs[new_fold] = tabs.pop(old_fold)
+				changed = True
+		if changed:
+			self._save_speech_states()
 
 	def close_tab(self, tab_name: str) -> None:
 		"""
