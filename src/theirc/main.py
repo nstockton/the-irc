@@ -625,7 +625,8 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		self.labeled_response_enabled: bool = False
 		# For labeled-response echo correlation (preferred, exact match).
 		self._label_counter: int = -1
-		self._our_labels: set[str] = set()
+		# Maps outgoing labels to monotonic timestamps of unmatched responses.
+		self._our_labels: dict[str, float] = {}
 		# Fallback text-based tracking for servers without labeled-response.
 		# Maps outgoing body text to monotonic timestamps of unmatched sends.
 		self._pending_echoes: defaultdict[str, list[float]] = defaultdict(list)
@@ -712,6 +713,13 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		msg = NUMERIC_MESSAGES.get(event.type, f"Numeric reply {event.type}")
 		info: str = event.arguments[-1] if event.arguments else ""
 		self.log_system_message(f"{msg}: {info!r} ({event.type}).")
+
+	def _prune_our_labels(self) -> None:
+		"""Drop labeled-response ids that were never matched by a server echo."""
+		cutoff: float = time.monotonic() - ECHO_PENDING_TTL
+		stale: list[str] = [label for label, ts in self._our_labels.items() if ts < cutoff]
+		for label in stale:
+			self._our_labels.pop(label, None)
 
 	def _prune_pending_echoes(self) -> None:
 		"""Drop unmatched echo-message slots that have outlived ECHO_PENDING_TTL."""
@@ -1133,7 +1141,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			# so _our_labels cannot grow without bound when inner events omit the tag.
 			batch_label: str = batch_info.tags.get("label", "")
 			if batch_label:
-				self._our_labels.discard(batch_label)
+				self._our_labels.pop(batch_label, None)
 
 	def add_batch_func_call(self, batch_id: str, /, *args: Any, **kwargs: Any) -> bool:
 		"""
@@ -1193,6 +1201,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			message_info.history_target = batch_info.params[0]
 		if self.echo_message_enabled and message_info.history_target is None:
 			# Suppress server echoes unless message is part of a history batch.
+			self._prune_our_labels()
 			# labeled-response can place `label` on the BATCH + start line; inner PRIVMSG
 			# events might only carry batch=<id> in that case. Accept either source.
 			msg_label: str = tags.get("label", "")
@@ -1211,7 +1220,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			matched_label: bool = bool(own_label and (msg_label or is_source_us))
 			if (self.labeled_response_enabled and matched_label) or has_pending_echoes:
 				if own_label:
-					self._our_labels.discard(own_label)
+					self._our_labels.pop(own_label, None)
 				if has_pending_echoes:
 					self._consume_pending_echo(message_info.text)
 				return
@@ -1498,7 +1507,8 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 				self._note_outgoing_echo(chunk)
 				if self.labeled_response_enabled:
 					label: str = self._next_label()
-					self._our_labels.add(label)
+					self._prune_our_labels()
+					self._our_labels[label] = time.monotonic()
 					tags.append(f"label={label}")
 			# Note that `send_items` filters out empty strings.
 			self.connection.send_items(
