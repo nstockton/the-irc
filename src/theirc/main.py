@@ -1130,7 +1130,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			for args, kwargs in func_calls:
 				self._handle_message(*args, batch_info=batch_info, **kwargs)
 
-	def add_batch_func_call(self, batch_id: str, /, *args: Any, **kwargs: Any) -> None:
+	def add_batch_func_call(self, batch_id: str, /, *args: Any, **kwargs: Any) -> bool:
 		"""
 		Queue a message handler call to be executed when the named batch finishes.
 
@@ -1138,14 +1138,18 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			batch_id: Identifier of the batch to attach the call to.
 			*args: Positional arguments for _handle_message.
 			**kwargs: Keyword arguments for _handle_message.
+
+		Returns:
+			True if the call was queued, False if the batch id is unknown.
 		"""
 		func_call: BatchFuncCallType = (args, kwargs)
 		batch = self.batches.get(batch_id)
 		if batch is None:
 			logger.warning(f"Batch ID {batch_id} doesn't exist: {func_call!r}")
-			return
+			return False
 		func_calls: list[BatchFuncCallType] = batch["func_calls"]
 		func_calls.append(func_call)
+		return True
 
 	def _handle_message(
 		self,
@@ -1175,8 +1179,10 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			batch = self.batches.get(batch_id)
 			if batch is not None and not batch["func_calls"]:  # Existing empty batch.
 				message_info.is_batch_start = True
-			self.add_batch_func_call(batch_id, connection, event, message_info)
-			return
+			if self.add_batch_func_call(batch_id, connection, event, message_info):
+				return  # Call was successfully queued.
+			# Unknown batch id: deliver immediately rather than dropping the line.
+			logger.debug(f"Delivering message with unknown batch id {batch_id} immediately")
 		folded_our_nick: str = connection.get_nickname().casefold()
 		if batch_info is not None and batch_info.type is BatchTypeEnum.CHATHISTORY and batch_info.params:
 			message_info.history_target = batch_info.params[0]
