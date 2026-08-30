@@ -12,17 +12,25 @@ from __future__ import annotations
 # Built-in Modules:
 import functools
 import operator
+import re
 from collections.abc import Iterable
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 # Third-party Modules:
 from knickknacks.platforms import get_directory_path, is_frozen
+from knickknacks.typedef import RePatternType
 
 
 # Constants:
-DATA_DIRECTORY: str = "theirc_data"
+DATA_DIRECTORY: Final[str] = "theirc_data"
+# RFC 2812 nick characters.
+NICK_INITIAL_CHAR_CLASS = r"\x41-\x7d"
+NICK_SUBSEQUENT_CHAR_CLASS = r"\x2d\x30-\x39\x41-\x7d"
+RFC2812_NICK_REGEX: Final[RePatternType] = re.compile(
+	rf"^[{NICK_INITIAL_CHAR_CLASS}][{NICK_SUBSEQUENT_CHAR_CLASS}]*$", flags=re.ASCII
+)
 
 # Globals:
 __version__: str = "0.0.0"
@@ -59,3 +67,34 @@ def reduce_or(items: Iterable[int], *, initial: int = 0) -> int:
 		The result of combining the initial value with all integers in the iterable using bitwise OR.
 	"""
 	return functools.reduce(operator.or_, items, initial)
+
+
+def is_nick(nick: str) -> bool:
+	"""
+	Tests if a nickname is valid according to RFC2812.
+
+	Args:
+		nick: The nick to validate.
+
+	Returns:
+		True if the nickname was valid, False otherwise.
+	"""
+	return RFC2812_NICK_REGEX.fullmatch(nick) is not None
+
+
+def is_mentioned_nick(nick: str, text: str) -> bool:
+	"""
+	Tests if a nickname is mentioned in text.
+
+	Args:
+		nick: a nickname.
+		text: Some text.
+
+	Returns:
+		True if nick is mentioned inside text, False otherwise.
+	"""
+	if not nick or not text:
+		return False
+	escaped: str = re.escape(nick)
+	char_class: str = NICK_SUBSEQUENT_CHAR_CLASS
+	return re.search(rf"(?:^|[^{char_class}]){escaped}(?:[^{char_class}]|$)", text) is not None

@@ -45,7 +45,7 @@ import pystray
 import wx
 from knickknacks.backports import StrEnum
 from knickknacks.numbers import clamp
-from knickknacks.typedef import override
+from knickknacks.typedef import RePatternType, override
 from PIL import Image
 from speechlight import speech
 from urlextract import URLExtract
@@ -66,7 +66,7 @@ from .typedef import (
 	WXListBoxType,
 	WXNotebookType,
 )
-from .utils import get_data_path, reduce_or
+from .utils import get_data_path, is_mentioned_nick, is_nick, reduce_or
 
 
 # Constants:
@@ -89,7 +89,7 @@ PRIVILEGES: Final[dict[str, tuple[int, str]]] = {
 }
 WX_NOT_FOUND: Final[int] = wx.NOT_FOUND
 UINT32_MAX: Final[int] = 0xFFFFFFFF
-WORDS_REGEX: Final[re.Pattern[str]] = re.compile(r"(\s+|[.\u3002!\uff01?\uff1f;\uff1b:\uff1a,\u3001\uff0c]+)")
+WORDS_REGEX: Final[RePatternType] = re.compile(r"(\s+|[.\u3002!\uff01?\uff1f;\uff1b:\uff1a,\u3001\uff0c]+)")
 UTF8_CONTINUATION_MASK: Final[int] = 0xC0
 UTF8_CONTINUATION_PREFIX: Final[int] = 0x80
 NO_MORE: Final[str] = "NO MORE"  # Return this when IRCClient should stop handling an event.
@@ -98,6 +98,7 @@ DEFAULT_HOST: Final[str] = "irc.theirc.net"
 DEFAULT_PORT: Final[int] = 6697
 DEFAULT_CLIENT_ID: Final[str] = "computer"
 DEFAULT_CONNECT_FACTORY: Final[FactoryType] = irc.connection.Factory()
+DEFAULT_NICK_LENGTH: Final[int] = 9
 DEFAULT_HISTORY_LENGTH: Final[int] = 1000  # CHATHISTORY request size
 ECHO_PENDING_TTL: Final[float] = 60.0  # Seconds before an unmatched echo-message slot expires.
 NUMERIC_MESSAGES: Final[dict[str, str]] = {
@@ -178,6 +179,7 @@ NUMERIC_MESSAGES: Final[dict[str, str]] = {
 logger: Final[logging.Logger] = logging.getLogger(__name__)
 url_extractor: Final[URLExtractType] = URLExtract()
 
+
 # Update cached TLD list if older than 7 days.
 url_extractor.update_when_older(7)
 
@@ -211,25 +213,6 @@ def get_numeric_name(numeric: str) -> str:
 	raise ValueError(f"Numeric name not found: {numeric!r}")
 
 
-def nick_is_mentioned(nick: str, text: str) -> bool:
-	"""
-	Tests if a nickname is mentioned in text.
-
-	Args:
-		nick: a nickname.
-		text: Some text.
-
-	Returns:
-		True if nick is mentioned inside text, False otherwise.
-	"""
-	if not nick or not text:
-		return False
-	escaped = re.escape(nick)
-	# RFC 2812 nick characters.
-	nick_char_class = r"A-Za-z0-9_\[\]\\`^{|}-"
-	return re.search(rf"(?:^|[^{nick_char_class}]){escaped}(?:[^{nick_char_class}]|$)", text) is not None
-
-
 def is_status_like(target: str) -> bool:
 	"""
 	Tests if a target is status-like and thus prevented from opening a query tab.
@@ -240,10 +223,8 @@ def is_status_like(target: str) -> bool:
 	Returns:
 		True if target is status-like, False otherwise.
 	"""
-	if not target or target.casefold() in STATUS_LIKE_TARGETS:
-		return True
-	# Server names look like hostnames and are not channels.
-	return not irc.client.is_channel(target) and "." in target
+	# Server names are not channels and look like hostnames.
+	return target.casefold() in STATUS_LIKE_TARGETS or not (irc.client.is_channel(target) or is_nick(target))
 
 
 def extract_tags(tags: Sequence[Mapping[str, Any]]) -> dict[str, str]:
@@ -657,6 +638,12 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			sasl_login=sasl_login,
 			sasl_password=sasl_password,
 		)
+
+	@property
+	def max_nick_length(self) -> int:
+		"""The maximum length of nicknames allowed by the server."""
+		nicklen: str = self.feature_list.get("nicklen", "")
+		return int(nicklen) if nicklen.isdigit() else DEFAULT_NICK_LENGTH
 
 	@property
 	def is_sasl_in_progress(self) -> bool:
@@ -1224,7 +1211,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 				if has_pending_echoes:
 					self._consume_pending_echo(message_info.text)
 				return
-		if is_status_like(message_info.target):
+		if len(message_info.target) > self.max_nick_length or is_status_like(message_info.target):
 			# Registration and server-wide notices belong on the status tab.
 			message_info.target = STATUS_TAB_NAME
 		elif message_info.folded_target == folded_our_nick:
@@ -1234,7 +1221,7 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 		message_info.is_mentioned = bool(
 			not message_info.history_target
 			and message_info.target != STATUS_TAB_NAME
-			and nick_is_mentioned(folded_our_nick, message_info.folded_text)
+			and is_mentioned_nick(folded_our_nick, message_info.folded_text)
 		)
 		wx.CallAfter(self.gui.append_to_output, message_info)
 
