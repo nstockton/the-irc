@@ -1129,6 +1129,11 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			func_calls: list[BatchFuncCallType] = batch["func_calls"]
 			for args, kwargs in func_calls:
 				self._handle_message(*args, batch_info=batch_info, **kwargs)
+			# Labels live on the BATCH + start line for labeled-response; consume leftovers
+			# so _our_labels cannot grow without bound when inner events omit the tag.
+			batch_label: str = batch_info.tags.get("label", "")
+			if batch_label:
+				self._our_labels.discard(batch_label)
 
 	def add_batch_func_call(self, batch_id: str, /, *args: Any, **kwargs: Any) -> bool:
 		"""
@@ -1188,13 +1193,26 @@ class IRCClient(irc.bot.SingleServerIRCBot):  # type: ignore[no-any-unimported, 
 			message_info.history_target = batch_info.params[0]
 		if self.echo_message_enabled and message_info.history_target is None:
 			# Suppress server echoes unless message is part of a history batch.
-			label: str = tags.get("label", "")
-			matched_label: bool = bool(self.labeled_response_enabled and label and label in self._our_labels)
+			# labeled-response can place `label` on the BATCH + start line; inner PRIVMSG
+			# events might only carry batch=<id> in that case. Accept either source.
+			msg_label: str = tags.get("label", "")
+			batch_label: str = batch_info.tags.get("label", "") if batch_info is not None else ""
+			own_label: str = (
+				msg_label
+				if msg_label in self._our_labels
+				else batch_label
+				if batch_label in self._our_labels
+				else ""
+			)
 			is_source_us: bool = message_info.folded_sender == folded_our_nick
-			has_pending: bool = bool(self._pending_echoes.get(message_info.text))
-			if matched_label or (is_source_us and has_pending):
-				self._our_labels.discard(label)
-				if has_pending:
+			has_pending_echoes: bool = bool(is_source_us and self._pending_echoes.get(message_info.text))
+			# A batch-level label only identifies *our* command. Do not suppress
+			# other senders that happen to be grouped in the same batch.
+			matched_label: bool = bool(own_label and (msg_label or is_source_us))
+			if (self.labeled_response_enabled and matched_label) or has_pending_echoes:
+				if own_label:
+					self._our_labels.discard(own_label)
+				if has_pending_echoes:
 					self._consume_pending_echo(message_info.text)
 				return
 		if is_status_like(message_info.target):
