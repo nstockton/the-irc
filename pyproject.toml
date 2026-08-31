@@ -17,7 +17,7 @@
 		"knickknacks>=0.8,<1.0",
 		"miniaudio>=1.7,<2.0",
 		"pillow>=12.3,<13.0",
-		"pystray>=0.19,<1.0",
+		"pystray==0.19.5",
 		"speechlight>=3.2,<4.0",
 		"urlextract>=1.9,<2.0",
 		"wxPython>=4.2,<5.0",

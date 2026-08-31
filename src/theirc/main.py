@@ -52,6 +52,7 @@ from urlextract import URLExtract
 
 # Local Modules:
 from .config import Config
+from .notification_patch import configure_notification_identity
 from .sound import play_sound
 from .typedef import (
 	BatchFuncCallType,
@@ -94,6 +95,7 @@ UTF8_CONTINUATION_MASK: Final[int] = 0xC0
 UTF8_CONTINUATION_PREFIX: Final[int] = 0x80
 NO_MORE: Final[str] = "NO MORE"  # Return this when IRCClient should stop handling an event.
 WINDOW_TITLE: Final[str] = "The IRC"
+WINDOWS_APP_ID: Final[str] = "TheIRC"
 DEFAULT_HOST: Final[str] = "irc.theirc.net"
 DEFAULT_PORT: Final[int] = 6697
 DEFAULT_CLIENT_ID: Final[str] = "computer"
@@ -2912,6 +2914,7 @@ def run() -> None:  # pragma: no cover
 		style="{",
 	)
 	logger.debug("IRC client starting.")
+	configure_notification_identity(WINDOW_TITLE, WINDOWS_APP_ID)
 	app = wx.App(redirect=False)
 	MainFrame()
 	app.MainLoop()
