@@ -2105,6 +2105,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		Args:
 			message_info: The associated MessageInfo object.
 		"""
+		is_hidden: bool = not self.IsShown()
 		if (
 			message_info.history_target is not None
 			and message_info.folded_history_target != message_info.folded_target
@@ -2116,6 +2117,11 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		if panel is None:
 			panel = self.create_tab(message_info.target)
 			self.play_notification_sound(INCOMING_QUERY_CREATED_SOUND)
+			if is_hidden:
+				# Window is hidden in the system tray; send a desktop notification.
+				self.show_tray_notification(
+					message_info.formatted_text, f"New private message from {message_info.target}"
+				)
 		if message_info.history_target is not None:  # History text.
 			# Clear the output on the *first* history message we receive for this tab.
 			# This prevents duplication with any offline messages the server may have
@@ -2136,7 +2142,6 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 				speech.output(
 					f"{'' if is_current_tab else preamble}{message_info.formatted_text}", interrupt=False
 				)
-			is_hidden: bool = not self.IsShown()
 			if (
 				message_info.is_mentioned
 				and message_info.target != STATUS_TAB_NAME
