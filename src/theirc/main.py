@@ -1637,7 +1637,7 @@ class TabPanel(wx.Panel):  # type: ignore[no-any-unimported, misc]
 		text: str = self.input.GetValue().strip()
 		if text:
 			self.main_frame.handle_input_entered(self.tab_name, text)
-			self.input.Clear()
+			self.clear_input()
 
 	def on_query(self, event: Any) -> None:
 		"""
@@ -1753,7 +1753,11 @@ class TabPanel(wx.Panel):  # type: ignore[no-any-unimported, misc]
 			"start": start,
 		}
 
-	def append_text(self, text: str) -> None:
+	def clear_input(self) -> None:
+		"""Clear text from the input control."""
+		self.input.Clear()
+
+	def append_output(self, text: str) -> None:
 		"""
 		Append a line of text to the output control.
 
@@ -1765,7 +1769,7 @@ class TabPanel(wx.Panel):  # type: ignore[no-any-unimported, misc]
 		if at_bottom:
 			self.output.SetInsertionPointEnd()
 
-	def clear_text(self) -> None:
+	def clear_output(self) -> None:
 		"""Clear text from the output control."""
 		self.output.Clear()
 
@@ -1791,6 +1795,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		self.SetSizer(sizer)
 		self.SetMenuBar(self.create_menubar())
 		# Accelerators.
+		self._clear_input_id = wx.NewIdRef()
 		self._speech_enable_globally_id = wx.NewIdRef()
 		self._speech_disable_globally_id = wx.NewIdRef()
 		self._speech_enable_current_tab_id = wx.NewIdRef()
@@ -1799,7 +1804,8 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		self._raise_volume_id = wx.NewIdRef()
 		self._minimize_to_tray_id = wx.NewIdRef()
 		self._extract_urls_id = wx.NewIdRef()
-		accel: list[tuple[int, int, Callable[[Any], None]]] = [
+		accel: list[tuple[int, int, int]] = [
+			(wx.ACCEL_CTRL, ord("U"), self._clear_input_id),
 			(wx.ACCEL_CTRL, ord("W"), wx.ID_CLOSE),
 			(wx.ACCEL_CTRL, wx.WXK_F4, wx.ID_CLOSE),
 			(wx.ACCEL_NORMAL, wx.WXK_F3, self._extract_urls_id),
@@ -1814,6 +1820,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		if sys.platform not in {"win32", "darwin"}:
 			accel.append((wx.ACCEL_CTRL, ord("Q"), wx.ID_EXIT))
 		self.SetAcceleratorTable(wx.AcceleratorTable(accel))
+		self.Bind(wx.EVT_MENU, self.on_clear_input, id=self._clear_input_id)
 		self.Bind(wx.EVT_MENU, self.on_close_tab, id=wx.ID_CLOSE)
 		self.Bind(wx.EVT_MENU, self.on_extract_urls, id=self._extract_urls_id)
 		self.Bind(wx.EVT_MENU, self.enable_speech_globally, id=self._speech_enable_globally_id)
@@ -1952,9 +1959,9 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		existing = self.get_tab(new_name)
 		if existing is not None and existing is not panel:
 			old_text: str = panel.output.GetValue()
-			existing.append_text(f"*** {old_name} is now known as {new_name}")
+			existing.append_output(f"*** {old_name} is now known as {new_name}")
 			if old_text:
-				existing.append_text(old_text)
+				existing.append_output(old_text)
 			self.close_tab(old_name)
 			self._migrate_speech_state(old_name, new_name)
 			return
@@ -2132,7 +2139,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 			# Visual flicker is possible but preferred over permanent duplicates.
 			if not panel.received_initial_history:
 				panel.received_initial_history = True
-				panel.clear_text()
+				panel.clear_output()
 		else:  # Live text.
 			is_current_tab: bool = (
 				self.IsActive() and message_info.folded_target == self.current_tab_name.casefold()
@@ -2156,7 +2163,7 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 					self.show_tray_notification(
 						message_info.formatted_text, f"Mentioned in {message_info.target}"
 					)
-		panel.append_text(message_info.formatted_text)
+		panel.append_output(message_info.formatted_text)
 
 	def update_nick_list(self, tab_name: str) -> None:
 		"""
@@ -2599,6 +2606,18 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		dlg = UrlListDialog(self, urls)
 		dlg.ShowModal()
 		dlg.Destroy()
+
+	def on_clear_input(self, event: Any) -> None:
+		"""
+		Clear the input for the currently selected tab.
+
+		Args:
+			event: The accelerator event.
+		"""
+		panel: TabPanel | None = self.current_tab
+		if panel is not None:
+			panel.clear_input()
+			speech.output("Cleared", interrupt=True)
 
 
 class ConnectDialog(wx.Dialog):  # type: ignore[no-any-unimported, misc]
