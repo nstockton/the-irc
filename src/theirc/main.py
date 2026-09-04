@@ -1799,21 +1799,21 @@ class MainFrame(wx.Frame):  # type: ignore[no-any-unimported, misc] # NOQA: PLR0
 		self._raise_volume_id = wx.NewIdRef()
 		self._minimize_to_tray_id = wx.NewIdRef()
 		self._extract_urls_id = wx.NewIdRef()
-		accel = wx.AcceleratorTable(
-			[
-				(wx.ACCEL_CTRL, ord("W"), wx.ID_CLOSE),
-				(wx.ACCEL_CTRL, wx.WXK_F4, wx.ID_CLOSE),
-				(wx.ACCEL_NORMAL, wx.WXK_F3, self._extract_urls_id),
-				(wx.ACCEL_NORMAL, wx.WXK_F5, self._speech_enable_globally_id),
-				(wx.ACCEL_NORMAL, wx.WXK_F6, self._speech_disable_globally_id),
-				(wx.ACCEL_CTRL, wx.WXK_F5, self._speech_enable_current_tab_id),
-				(wx.ACCEL_CTRL, wx.WXK_F6, self._speech_disable_current_tab_id),
-				(wx.ACCEL_NORMAL, wx.WXK_F7, self._lower_volume_id),
-				(wx.ACCEL_NORMAL, wx.WXK_F8, self._raise_volume_id),
-				(wx.ACCEL_NORMAL, wx.WXK_ESCAPE, self._minimize_to_tray_id),
-			]
-		)
-		self.SetAcceleratorTable(accel)
+		accel: list[tuple[int, int, Callable[[Any], None]]] = [
+			(wx.ACCEL_CTRL, ord("W"), wx.ID_CLOSE),
+			(wx.ACCEL_CTRL, wx.WXK_F4, wx.ID_CLOSE),
+			(wx.ACCEL_NORMAL, wx.WXK_F3, self._extract_urls_id),
+			(wx.ACCEL_NORMAL, wx.WXK_F5, self._speech_enable_globally_id),
+			(wx.ACCEL_NORMAL, wx.WXK_F6, self._speech_disable_globally_id),
+			(wx.ACCEL_CTRL, wx.WXK_F5, self._speech_enable_current_tab_id),
+			(wx.ACCEL_CTRL, wx.WXK_F6, self._speech_disable_current_tab_id),
+			(wx.ACCEL_NORMAL, wx.WXK_F7, self._lower_volume_id),
+			(wx.ACCEL_NORMAL, wx.WXK_F8, self._raise_volume_id),
+			(wx.ACCEL_NORMAL, wx.WXK_ESCAPE, self._minimize_to_tray_id),
+		]
+		if sys.platform not in {"win32", "darwin"}:
+			accel.append((wx.ACCEL_CTRL, ord("Q"), wx.ID_EXIT))
+		self.SetAcceleratorTable(wx.AcceleratorTable(accel))
 		self.Bind(wx.EVT_MENU, self.on_close_tab, id=wx.ID_CLOSE)
 		self.Bind(wx.EVT_MENU, self.on_extract_urls, id=self._extract_urls_id)
 		self.Bind(wx.EVT_MENU, self.enable_speech_globally, id=self._speech_enable_globally_id)
